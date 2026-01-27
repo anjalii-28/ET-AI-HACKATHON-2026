@@ -1,0 +1,24 @@
+{
+  "name": "call-processing-report-dashboard",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "load-data": "node scripts/loadData.js",
+    "watch-data": "node scripts/loadData.js --watch",
+    "dev": "npm run load-data && npx vite",
+    "dev:watch": "npm run watch-data & npx vite",
+    "build": "npm run load-data && tsc && npx vite build",
+    "preview": "npx vite preview"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@vitejs/plugin-react": "^4.2.0",
+    "typescript": "^5.2.2",
+    "vite": "^5.0.0"
+  }
+}

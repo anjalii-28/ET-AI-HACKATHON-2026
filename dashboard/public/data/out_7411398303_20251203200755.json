@@ -1,0 +1,30 @@
+{
+  "source_type": "call",
+  "call_classification": "TICKET_COMPLAINT",
+  "recordType": "TICKET",
+  "notes": "Caller was told the MRI report would be ready by 6 or 7 PM today, but it is not. The scan was done at 10 AM today. The caller has an emergency and needs the report to take to a hospital. The agent states the report will only be ready tomorrow because the doctor is not available tonight. The caller is upset about the misinformation and the delay, especially after paying a premium.",
+  "ticket_solution": "The MRI report will be available tomorrow.",
+  "action_required": "ACTION_REQUIRED",
+  "LeadNotes": null,
+  "customer_name": "Dhanya",
+  "phone_number": null,
+  "location": null,
+  "department": null,
+  "services": [
+    "MRI report",
+    "scan"
+  ],
+  "follow_up_required": true,
+  "timestamp": "2025-12-03T20:07:55",
+  "hospital_name": null,
+  "doctor_name": null,
+  "sentiment_label": "FRUSTRATED",
+  "sentiment_summary": "The caller is highly frustrated and upset due to being misinformed about the MRI report's availability. They were promised the report today for an emergency, but it will only be ready tomorrow, causing significant inconvenience and distress.",
+  "follow_ups": [
+    {
+      "doctor": null,
+      "department": null,
+      "follow_up_time": "tomorrow"
+    }
+  ]
+}

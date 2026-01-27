@@ -1,0 +1,21 @@
+{
+  "source_type": "call",
+  "call_classification": "LEAD_CONSULTATION",
+  "recordType": "LEAD",
+  "notes": "Caller's wife is breastfeeding, has a 1 year 2 months old baby. She had a C-section. Experiencing severe stomach pain and acidity since afternoon/evening. Took Aciloc 150 last night. Caller asked if Meftal Spas can be given. Caller is unable to bring wife and baby to the hospital immediately.",
+  "ticket_solution": null,
+  "action_required": "ACTION_REQUIRED",
+  "LeadNotes": null,
+  "customer_name": null,
+  "phone_number": null,
+  "location": "HSR Nagar, Bangalore",
+  "department": null,
+  "services": null,
+  "follow_up_required": true,
+  "timestamp": "2025-12-03T00:35:49",
+  "hospital_name": "Sparsh Hospital",
+  "doctor_name": null,
+  "sentiment_label": "ANXIOUS",
+  "sentiment_summary": "Caller is anxious and concerned about his wife's severe stomach pain and acidity, especially with a baby at home, making it difficult to visit the hospital immediately.",
+  "follow_ups": null
+}

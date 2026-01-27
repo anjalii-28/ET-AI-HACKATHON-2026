@@ -1,0 +1,21 @@
+{
+  "source_type": "call",
+  "call_classification": "LEAD_APPOINTMENT_BOOKING",
+  "recordType": "LEAD",
+  "notes": "Dr. Srinivas is not currently practicing. Dr. Aproopa is available. Patient is already registered.",
+  "ticket_solution": null,
+  "action_required": "ACTION_REQUIRED",
+  "LeadNotes": null,
+  "customer_name": "Balesh",
+  "phone_number": null,
+  "location": null,
+  "department": "NEUROLOGY",
+  "services": null,
+  "follow_up_required": null,
+  "timestamp": "2025-12-03T10:41:53",
+  "hospital_name": null,
+  "doctor_name": "Dr. Aproopa",
+  "sentiment_label": "NEUTRAL",
+  "sentiment_summary": "The caller requested an appointment for a specific doctor, was informed that doctor is not available, and then booked an appointment with another available doctor. The conversation was straightforward and transactional.",
+  "follow_ups": null
+}
