@@ -19,8 +19,7 @@ if not GEMINI_API_KEY:
     raise ValueError("GEMINI_API_KEY not found")
 
 # Initialize Gemini API client
-# Use v1alpha API version for Gemini 2.0 Flash support
-client = genai.Client(api_key=GEMINI_API_KEY, http_options={'api_version': 'v1alpha'})
+client = genai.Client(api_key=GEMINI_API_KEY)
 
 # Create output directory if it doesn't exist
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -30,7 +29,18 @@ def extract_timestamp_from_filename(filename):
     # Try to extract timestamp from filename patterns
     # Example: in_8867065830_Sparsh_Emergency_Muthumari_1012_inbound_20251203134613.WAV
     import re
-    # Look for YYYYMMDDHHMMSS pattern
+    # Look for YYYYMMDDHHMMSS pattern right before file extension (most reliable)
+    # Pattern: 14 digits followed by .WAV/.wav/.mp3 etc.
+    match = re.search(r'(\d{14})\.(WAV|wav|mp3|MP3)', filename)
+    if match:
+        ts_str = match.group(1)
+        try:
+            # Parse: YYYYMMDDHHMMSS
+            dt = datetime.strptime(ts_str, "%Y%m%d%H%M%S")
+            return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        except Exception as e:
+            print(f"  WARNING: Could not parse timestamp '{ts_str}' from filename: {e}")
+    # Fallback: look for any 14-digit pattern
     match = re.search(r'(\d{14})', filename)
     if match:
         ts_str = match.group(1)
@@ -38,9 +48,10 @@ def extract_timestamp_from_filename(filename):
             # Parse: YYYYMMDDHHMMSS
             dt = datetime.strptime(ts_str, "%Y%m%d%H%M%S")
             return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-        except:
-            pass
+        except Exception as e:
+            print(f"  WARNING: Could not parse timestamp '{ts_str}' from filename: {e}")
     # Default to current timestamp
+    print(f"  WARNING: No valid timestamp found in filename '{filename}', using current time")
     return datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
 
 def process_audio_file(audio_path):
@@ -62,8 +73,8 @@ def process_audio_file(audio_path):
   "source_type": "call",
   "call_classification": "TICKET_EXISTING_APPOINTMENT" | "TICKET_NEW_APPOINTMENT" | "TICKET_ENQUIRY" | "TICKET_COMPLAINT" | "LEAD_SERVICE_INQUIRY" | "LEAD_APPOINTMENT_BOOKING" | "OTHER",
   "recordType": "TICKET" | "LEAD",
-  "notes": "Detailed summary of the call conversation",
-  "ticket_solution": "How the call was resolved or what action was taken (for TICKET only)",
+  "ticket_notes": "Brief, precise summary of the call conversation (2-3 lines maximum)",
+  "call_solution": "How the call was resolved or what action was taken",
   "action_required": "ACTION_REQUIRED" | "NO_ACTION" | "FOLLOW_UP",
   "LeadNotes": null or "Notes for lead (for LEAD only)",
   "customer_name": "Name of the caller",
@@ -72,7 +83,6 @@ def process_audio_file(audio_path):
   "department": "Department name if mentioned",
   "services": "Services inquired about",
   "follow_up_required": true | false,
-  "timestamp": "ISO-8601 timestamp",
   "hospital_name": "Hospital name if mentioned",
   "doctor_name": "Doctor name if mentioned",
   "sentiment_label": "POSITIVE" | "NEUTRAL" | "NEGATIVE" | "ANXIOUS" | "FRUSTRATED",
@@ -89,18 +99,21 @@ def process_audio_file(audio_path):
 Important:
 - Return ONLY valid JSON, no markdown or extra text
 - Use null for missing values (not "null" string)
-- timestamp should be ISO-8601 format
-- For TICKET: notes should contain full ticket summary, ticket_solution should explain resolution
-- For LEAD: LeadNotes should contain lead-specific notes, notes can be general summary
+- DO NOT include timestamp field - it will be extracted from the filename automatically
+- ticket_notes field: Keep it BRIEF and PRECISE - maximum 2-3 lines. Focus on key points only, avoid lengthy descriptions
+- call_solution: Brief explanation of how the call was resolved or what action was taken (2-3 lines maximum)
+- For TICKET: ticket_notes should be concise ticket summary (2-3 lines), call_solution should explain resolution briefly
+- For LEAD: LeadNotes should contain concise lead-specific notes (2-3 lines), ticket_notes can be brief general summary
 - call_classification should be one of the specified values
 - sentiment_label should be one of the specified values
 - follow_ups should be an array (empty array if none)
+- Keep recordType field as "TICKET" or "LEAD" based on the call type
 """
 
-        # Generate response using gemini-2.0-flash (not gemini-2.0-flash-exp)
+        # Generate response using gemini-2.5-flash
         print("  Sending to Gemini API...")
         response = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-2.5-flash",
             contents=[prompt, audio_file]
         )
         
@@ -123,9 +136,11 @@ Important:
         # Parse JSON
         extracted_data = json.loads(response_text)
         
-        # Add timestamp from filename if not present
-        if not extracted_data.get("timestamp"):
-            extracted_data["timestamp"] = extract_timestamp_from_filename(audio_path.name)
+        # Always extract timestamp from filename (filename is the source of truth)
+        # Remove any timestamp Gemini might have provided
+        filename_timestamp = extract_timestamp_from_filename(audio_path.name)
+        extracted_data["timestamp"] = filename_timestamp
+        print(f"  Extracted timestamp from filename: {filename_timestamp}")
         
         # Ensure source_type is set
         if not extracted_data.get("source_type"):

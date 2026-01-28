@@ -7,7 +7,8 @@ const __dirname = path.dirname(__filename);
 
 // Only check the specific output folder
 const PROJECT_ROOT = path.join(__dirname, '..');
-const OUTPUT_FOLDER = '/Users/anjali/Desktop/call-entity-extract backup/output';
+// Use environment variable if set, otherwise default to relative path from project root
+const OUTPUT_FOLDER = process.env.OUTPUT_FOLDER || path.join(PROJECT_ROOT, '..', 'output');
 
 // Check if running in watch mode (for dev server)
 const WATCH_MODE = process.argv.includes('--watch');
