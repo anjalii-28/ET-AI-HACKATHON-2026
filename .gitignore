@@ -1,2 +1,4 @@
 /Design
-/.vscode
+/.vscode__pycache__/
+*.pyc
+selected_audio_samples/
