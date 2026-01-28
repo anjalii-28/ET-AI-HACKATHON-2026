@@ -2,3 +2,19 @@
 /.vscode__pycache__/
 *.pyc
 selected_audio_samples/
+# Node
+node_modules/
+# Build
+dist/
+build/
+.vite/
+
+# Env
+.env
+.env.local
+
+# OS
+.DS_Store
+output/
+audio/
+used audio/
