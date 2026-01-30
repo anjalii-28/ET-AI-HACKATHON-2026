@@ -8,10 +8,11 @@ from datetime import datetime
 # Load environment variables
 load_dotenv()
 
-# Configuration
+# Configuration: one output folder for all JSON files (relative to script location)
+_SCRIPT_DIR = Path(__file__).resolve().parent
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-AUDIO_DIR = "audio"
-OUTPUT_DIR = "output"
+AUDIO_DIR = _SCRIPT_DIR / "audio"
+OUTPUT_DIR = _SCRIPT_DIR / "output"  # only place JSON files are saved
 
 if not GEMINI_API_KEY:
     print("ERROR: GEMINI_API_KEY not found in .env file or environment variables.")
@@ -22,7 +23,7 @@ if not GEMINI_API_KEY:
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 # Create output directory if it doesn't exist
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 def extract_timestamp_from_filename(filename):
     """Extract timestamp from filename if available."""
@@ -67,47 +68,71 @@ def process_audio_file(audio_path):
         audio_file = client.files.upload(file=str(audio_path))
         
         # Create prompt for entity extraction
-        prompt = """Analyze this audio call transcript and extract the following information in JSON format:
+        prompt = """Analyze this audio call transcript and classify it STRICTLY using the rules below. Then extract the requested information in JSON format.
+
+=== CLASSIFICATION RULES (apply strictly) ===
+
+MAIN CATEGORY — Choose only one: LEAD or TICKET
+
+LEAD (Pre-visit / Pre-conversion)
+Mark as LEAD if ANY of the following are true:
+- Booking a new appointment → Lead – Appointment
+- Enquiry about availability, timings, doctors → Lead – Enquiry
+- Asking about services, procedures, or costs → Lead – Enquiry
+- First-time contact for a patient
+- Walk-in intent
+- Phrases like: "Can I book…", "Is doctor X available…", "Do you provide…"
+- Patient has not yet received any care
+- Think: before visit, before conversion
+
+TICKET (Support / Post-interaction)
+Mark as TICKET if the call is about something that already exists. Use TICKET if ANY of the following are true:
+- Existing appointment issues (reschedule, delay, confusion) → Ticket – Appointment
+- Follow-up after consultation → Ticket – Follow-up
+- Test results discussion → Ticket – Discussion
+- Post-visit complaints or clarifications → Ticket – Complaint
+- Prescription or medication doubts → Ticket – Follow-up
+- Billing issues → Ticket – Enquiry
+- Doctor already consulted
+- Phrases like: "I already visited…", "I had an appointment…", "I was told to…"
+- Agent action needed (callback, escalation, coordination)
+- Questions about lab reports → Ticket – Enquiry (if lab reports missing, assign to appropriate department)
+
+=== OUTPUT (valid JSON only) ===
+
+Return exactly these fields in this order. No other fields.
 
 {
   "source_type": "call",
-  "call_classification": "TICKET_EXISTING_APPOINTMENT" | "TICKET_NEW_APPOINTMENT" | "TICKET_ENQUIRY" | "TICKET_COMPLAINT" | "LEAD_SERVICE_INQUIRY" | "LEAD_APPOINTMENT_BOOKING" | "OTHER",
-  "recordType": "TICKET" | "LEAD",
-  "ticket_notes": "Brief, precise summary of the call conversation (2-3 lines maximum)",
-  "call_solution": "How the call was resolved or what action was taken",
-  "action_required": "ACTION_REQUIRED" | "NO_ACTION" | "FOLLOW_UP",
-  "LeadNotes": null or "Notes for lead (for LEAD only)",
-  "customer_name": "Name of the caller",
-  "phone_number": "Phone number if mentioned",
-  "location": "Location if mentioned",
-  "department": "Department name if mentioned",
-  "services": "Services inquired about",
-  "follow_up_required": true | false,
-  "hospital_name": "Hospital name if mentioned",
-  "doctor_name": "Doctor name if mentioned",
-  "sentiment_label": "POSITIVE" | "NEUTRAL" | "NEGATIVE" | "ANXIOUS" | "FRUSTRATED",
-  "sentiment_summary": "Brief sentiment analysis",
-  "follow_ups": [
-    {
-      "doctor": "Doctor name for follow-up",
-      "department": "Department for follow-up",
-      "follow_up_time": "When follow-up is needed"
-    }
-  ]
+  "recordType": "lead" or "ticket",
+  "call_classification": "Appointment" or "Enquiry" or "Complaint" or "Service Required" or "Follow-up" or "Discussion",
+  "action_required": "Yes" or "No",
+  "action_description": "If action_required is Yes, one line describing what action is needed. If No, set to null.",
+  "department_to_handle": "Department name (e.g. General OPD, Billing, Lab, Cardiology)",
+  "priority": "Low" or "Medium" or "High" or "Emergency",
+  "ticket_notes": "Brief summary (2-3 lines). MUST be null when recordType is lead.",
+  "LeadNotes": "Notes for lead (2-3 lines). MUST be null when recordType is ticket.",
+  "call_solution": "How the call was resolved (2-3 lines max)",
+  "customer_name": "Name of the caller or null",
+  "phone_number": "Phone number or null",
+  "location": "Location or null",
+  "department": "Department if mentioned or null",
+  "services": "Services inquired about or null",
+  "follow_up_required": true or false,
+  "hospital_name": "Hospital name or null",
+  "doctor_name": "Doctor name or null",
+  "sentiment_label": "POSITIVE" or "NEUTRAL" or "NEGATIVE" or "ANXIOUS" or "FRUSTRATED",
+  "sentiment_summary": "Brief sentiment in one line"
 }
 
-Important:
-- Return ONLY valid JSON, no markdown or extra text
-- Use null for missing values (not "null" string)
-- DO NOT include timestamp field - it will be extracted from the filename automatically
-- ticket_notes field: Keep it BRIEF and PRECISE - maximum 2-3 lines. Focus on key points only, avoid lengthy descriptions
-- call_solution: Brief explanation of how the call was resolved or what action was taken (2-3 lines maximum)
-- For TICKET: ticket_notes should be concise ticket summary (2-3 lines), call_solution should explain resolution briefly
-- For LEAD: LeadNotes should contain concise lead-specific notes (2-3 lines), ticket_notes can be brief general summary
-- call_classification should be one of the specified values
-- sentiment_label should be one of the specified values
-- follow_ups should be an array (empty array if none)
-- Keep recordType field as "TICKET" or "LEAD" based on the call type
+CRITICAL rules:
+- recordType: only lowercase "lead" or "ticket".
+- call_classification: only one of Appointment, Enquiry, Complaint, Service Required, Follow-up, Discussion.
+- For lead: ticket_notes must be null; use LeadNotes for the summary.
+- For ticket: LeadNotes must be null; use ticket_notes for the summary.
+- action_required: only "Yes" or "No". When "Yes", action_description must be one line; when "No", action_description must be null.
+- Do NOT include follow_ups, main_category, subcategory, or timestamp.
+- Return ONLY valid JSON.
 """
 
         # Generate response using gemini-2.5-flash
@@ -136,6 +161,38 @@ Important:
         # Parse JSON
         extracted_data = json.loads(response_text)
         
+        # Normalize recordType to lowercase (lead/ticket only)
+        rt_raw = extracted_data.get("recordType")
+        if rt_raw:
+            r = str(rt_raw).strip().lower()
+            if "lead" in r or r == "l":
+                extracted_data["recordType"] = "lead"
+            elif "ticket" in r or r == "t":
+                extracted_data["recordType"] = "ticket"
+        rt = extracted_data.get("recordType", "")
+        # Enforce: ticket_notes empty for leads, LeadNotes empty for tickets
+        if rt == "lead":
+            extracted_data["ticket_notes"] = None
+        elif rt == "ticket":
+            extracted_data["LeadNotes"] = None
+        # Normalize action_required to Yes/No
+        ar = extracted_data.get("action_required")
+        if ar is not None:
+            ar_str = str(ar).strip().upper()
+            if ar_str in ("YES", "Y", "TRUE", "ACTION_REQUIRED", "FOLLOW_UP", "REQUIRED"):
+                extracted_data["action_required"] = "Yes"
+                if not extracted_data.get("action_description"):
+                    extracted_data["action_description"] = extracted_data.get("call_solution") or None
+            else:
+                extracted_data["action_required"] = "No"
+                extracted_data["action_description"] = None
+        # Ensure action_description when action_required is Yes
+        if extracted_data.get("action_required") == "Yes" and not extracted_data.get("action_description"):
+            extracted_data["action_description"] = extracted_data.get("call_solution") or "Action needed."
+        # Remove obsolete fields
+        for key in ("main_category", "subcategory", "follow_ups"):
+            extracted_data.pop(key, None)
+        
         # Always extract timestamp from filename (filename is the source of truth)
         # Remove any timestamp Gemini might have provided
         filename_timestamp = extract_timestamp_from_filename(audio_path.name)
@@ -145,9 +202,22 @@ Important:
         # Ensure source_type is set
         if not extracted_data.get("source_type"):
             extracted_data["source_type"] = "call"
-        
+        # Ensure action_description exists (null when action_required is No)
+        if extracted_data.get("action_required") != "Yes":
+            extracted_data["action_description"] = None
+        # Output order: source_type first, then rest in consistent order
+        key_order = (
+            "source_type", "recordType", "call_classification", "action_required", "action_description",
+            "department_to_handle", "priority", "ticket_notes", "LeadNotes", "call_solution",
+            "customer_name", "phone_number", "location", "department", "services", "follow_up_required",
+            "hospital_name", "doctor_name", "sentiment_label", "sentiment_summary", "timestamp"
+        )
+        ordered = {k: extracted_data[k] for k in key_order if k in extracted_data}
+        for k, v in extracted_data.items():
+            if k not in ordered:
+                ordered[k] = v
         print(f"  Successfully extracted entities")
-        return extracted_data
+        return ordered
         
     except json.JSONDecodeError as e:
         print(f"  ERROR: Error parsing JSON response: {e}")
@@ -171,21 +241,21 @@ Important:
 def main():
     print("Entity Extraction Script")
     print("=" * 50)
-    print(f"Audio directory: {AUDIO_DIR}/")
-    print(f"Output directory: {OUTPUT_DIR}/")
+    print(f"Audio directory: {AUDIO_DIR.resolve()}")
+    print(f"Output directory: {OUTPUT_DIR.resolve()}")
     print("=" * 50)
     
     # Check if audio directory exists
-    if not os.path.exists(AUDIO_DIR):
+    if not AUDIO_DIR.exists():
         print(f"ERROR: Audio directory '{AUDIO_DIR}' not found!")
         print(f"   Please create the '{AUDIO_DIR}' folder and add your audio files there.")
         return
     
     # Find all audio files
-    audio_files = list(Path(AUDIO_DIR).glob("*.wav")) + \
-                  list(Path(AUDIO_DIR).glob("*.WAV")) + \
-                  list(Path(AUDIO_DIR).glob("*.mp3")) + \
-                  list(Path(AUDIO_DIR).glob("*.MP3"))
+    audio_files = list(AUDIO_DIR.glob("*.wav")) + \
+                  list(AUDIO_DIR.glob("*.WAV")) + \
+                  list(AUDIO_DIR.glob("*.mp3")) + \
+                  list(AUDIO_DIR.glob("*.MP3"))
     
     if not audio_files:
         print(f"WARNING: No audio files found in {AUDIO_DIR}/")
@@ -204,7 +274,7 @@ def main():
         if extracted_data:
             # Save to JSON file
             output_filename = audio_file.stem + ".json"
-            output_path = Path(OUTPUT_DIR) / output_filename
+            output_path = OUTPUT_DIR / output_filename
             
             try:
                 with open(output_path, "w", encoding="utf-8") as f:
@@ -221,7 +291,7 @@ def main():
     print("Processing complete!")
     print(f"   Successfully processed: {success_count}")
     print(f"   Failed: {failed_count}")
-    print(f"   JSON files saved in: {OUTPUT_DIR}/")
+    print(f"   JSON files saved in: {OUTPUT_DIR.resolve()}/")
     print("=" * 50)
 
 if __name__ == "__main__":
