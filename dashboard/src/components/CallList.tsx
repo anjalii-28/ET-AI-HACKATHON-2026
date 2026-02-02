@@ -171,22 +171,34 @@ export function CallList({ calls, onCallSelect, searchQuery }: CallListProps) {
       });
     }
 
-    // Apply search query (case-insensitive, partial match)
+    // Apply search query (case-insensitive) across all text fields so we can find everything
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase().trim();
+      const terms = query.split(/\s+/).filter(Boolean);
       filtered = filtered.filter((call) => {
-        const searchFields = [
+        const searchFields: (string | undefined | null)[] = [
           call.notes,
+          call.LeadNotes,
+          call.ticket_notes,
+          call.call_solution,
           call.ticket_solution,
+          call.transcript,
           call.sentiment_summary,
           call.customer_name,
           call.doctor_name,
           call.hospital_name,
+          call.department,
+          call.services,
+          call.call_classification,
+          call.filename,
+          call.location,
+          call.action_description,
         ];
-        return searchFields.some((field) => {
-          if (!field) return false;
-          return String(field).toLowerCase().includes(query);
-        });
+        const searchableText = searchFields
+          .filter((f) => f != null && String(f).trim() !== '')
+          .map((f) => String(f).toLowerCase())
+          .join(' ');
+        return terms.every((term) => searchableText.includes(term));
       });
     }
 

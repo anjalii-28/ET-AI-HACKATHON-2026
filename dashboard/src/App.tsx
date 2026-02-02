@@ -53,7 +53,7 @@ function App() {
             <input
               type="text"
               className="global-search-input"
-              placeholder="Search notes, resolution, doctor, hospital…"
+              placeholder="Search transcript, notes, names, department, services, filename…"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />

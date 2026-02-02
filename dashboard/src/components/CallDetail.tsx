@@ -117,6 +117,17 @@ export function CallDetail({ call, onClose }: CallDetailProps) {
     return recordType;
   };
 
+  // Unified notes: pipeline uses LeadNotes (lead) or ticket_notes (ticket), UI may use notes
+  const summaryNotes = call.notes ?? call.LeadNotes ?? call.ticket_notes ?? null;
+  const solutionText = call.call_solution ?? call.ticket_solution ?? null;
+  // Transcript: full transcript from pipeline, or combined summary for older data
+  const transcriptText =
+    (call.transcript && String(call.transcript).trim()) ||
+    [summaryNotes, solutionText, call.sentiment_summary]
+      .filter(Boolean)
+      .map((s) => String(s).trim())
+      .join('\n\n');
+
   return (
     <div className="call-detail-overlay" onClick={onClose}>
       <div className="call-detail-content" onClick={(e) => e.stopPropagation()}>
@@ -167,19 +178,27 @@ export function CallDetail({ call, onClose }: CallDetailProps) {
             </div>
           </section>
 
-          {/* Call Summary */}
-          {call.notes && (
+          {/* Transcript (full call content) */}
+          {transcriptText && (
             <section className="detail-section">
-              <h3>Call Summary</h3>
-              <div className="detail-text-content">{String(call.notes)}</div>
+              <h3>Transcript</h3>
+              <div className="detail-text-content detail-transcript">{transcriptText}</div>
             </section>
           )}
 
-          {/* Ticket Solution */}
-          {call.ticket_solution && (
+          {/* Call Summary (lead/ticket notes) */}
+          {summaryNotes && (
+            <section className="detail-section">
+              <h3>Call Summary</h3>
+              <div className="detail-text-content">{String(summaryNotes)}</div>
+            </section>
+          )}
+
+          {/* What Happened / Solution */}
+          {solutionText && (
             <section className="detail-section">
               <h3>What Happened in the Call</h3>
-              <div className="detail-text-content">{String(call.ticket_solution)}</div>
+              <div className="detail-text-content">{String(solutionText)}</div>
             </section>
           )}
 

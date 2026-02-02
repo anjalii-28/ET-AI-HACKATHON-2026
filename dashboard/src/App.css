@@ -537,6 +537,12 @@ body {
   border-left: 4px solid #10b981;
 }
 
+.detail-transcript {
+  max-height: 320px;
+  overflow-y: auto;
+  border-left-color: #6366f1;
+}
+
 .follow-up-list {
   list-style: none;
   padding: 0;

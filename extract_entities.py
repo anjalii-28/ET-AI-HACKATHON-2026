@@ -113,6 +113,7 @@ Return exactly these fields in this order. No other fields.
   "ticket_notes": "Brief summary (2-3 lines). MUST be null when recordType is lead.",
   "LeadNotes": "Notes for lead (2-3 lines). MUST be null when recordType is ticket.",
   "call_solution": "How the call was resolved (2-3 lines max)",
+  "transcript": "Full transcript of the entire call. Include everything said by both parties in order. Use 'Caller:' and 'Agent:' to label speakers. Do not summarize; include all substantive dialogue, as much as you can capture from the audio.",
   "customer_name": "Name of the caller or null",
   "phone_number": "Phone number or null",
   "location": "Location or null",
@@ -132,6 +133,7 @@ CRITICAL rules:
 - For ticket: LeadNotes must be null; use ticket_notes for the summary.
 - action_required: only "Yes" or "No". When "Yes", action_description must be one line; when "No", action_description must be null.
 - Do NOT include follow_ups, main_category, subcategory, or timestamp.
+- transcript: MUST be a full, verbatim-style transcript of the entire call (everything said by caller and agent, in order). Use "Caller:" and "Agent:" to label speakers. Do not summarize; include all substantive dialogue.
 - Return ONLY valid JSON.
 """
 
@@ -208,7 +210,7 @@ CRITICAL rules:
         # Output order: source_type first, then rest in consistent order
         key_order = (
             "source_type", "recordType", "call_classification", "action_required", "action_description",
-            "department_to_handle", "priority", "ticket_notes", "LeadNotes", "call_solution",
+            "department_to_handle", "priority", "ticket_notes", "LeadNotes", "call_solution", "transcript",
             "customer_name", "phone_number", "location", "department", "services", "follow_up_required",
             "hospital_name", "doctor_name", "sentiment_label", "sentiment_summary", "timestamp"
         )
