@@ -113,7 +113,7 @@ Return exactly these fields in this order. No other fields.
   "ticket_notes": "Brief summary (2-3 lines). MUST be null when recordType is lead.",
   "LeadNotes": "Notes for lead (2-3 lines). MUST be null when recordType is ticket.",
   "call_solution": "How the call was resolved (2-3 lines max)",
-  "transcript": "Full transcript of the entire call. Include everything said by both parties in order. Use 'Caller:' and 'Agent:' to label speakers. Do not summarize; include all substantive dialogue, as much as you can capture from the audio.",
+  "transcript": "A comprehensive narrative summary of the entire call written in long-form passive voice. Describe what the caller said and what the agent said throughout the conversation. Write it as a flowing narrative (e.g., 'The caller mentioned that...', 'The agent explained that...', 'The caller then asked about...', 'The agent responded by...'). Include all substantive dialogue and key points from the conversation, but present it as a cohesive summary narrative rather than direct quotes or speaker labels.",
   "customer_name": "Name of the caller or null",
   "phone_number": "Phone number or null",
   "location": "Location or null",
@@ -123,8 +123,17 @@ Return exactly these fields in this order. No other fields.
   "hospital_name": "Hospital name or null",
   "doctor_name": "Doctor name or null",
   "sentiment_label": "POSITIVE" or "NEUTRAL" or "NEGATIVE" or "ANXIOUS" or "FRUSTRATED",
-  "sentiment_summary": "Brief sentiment in one line"
+  "sentiment_summary": "Brief sentiment in one line",
+  "outcome": "ONE WORD ONLY from this list: CALLBACK, BOOKED, RESCHEDULED, INFORMATION CALL, FOLLOWUP, NOANSWER, DROPPED, ESCALATED, RESOLVED, CANCELLED, UNKNOWN"
 }
+
+=== OUTCOME RULES (one word only) ===
+- outcome: Select the value that best represents the final action or state of the call.
+- If multiple things happened, choose the last decisive action.
+- If the call ended without a clear action, return INFORMATION CALL.
+- If the call requires another action in the future, return FOLLOWUP.
+- If no clear signal is present, return UNKNOWN.
+- Output must be exactly one value from the allowed list above.
 
 CRITICAL rules:
 - recordType: only lowercase "lead" or "ticket".
@@ -133,7 +142,7 @@ CRITICAL rules:
 - For ticket: LeadNotes must be null; use ticket_notes for the summary.
 - action_required: only "Yes" or "No". When "Yes", action_description must be one line; when "No", action_description must be null.
 - Do NOT include follow_ups, main_category, subcategory, or timestamp.
-- transcript: MUST be a full, verbatim-style transcript of the entire call (everything said by caller and agent, in order). Use "Caller:" and "Agent:" to label speakers. Do not summarize; include all substantive dialogue.
+- transcript: MUST be a comprehensive narrative summary written in long-form passive voice, describing what the caller said and what the agent said throughout the conversation. Write as a flowing narrative (e.g., "The caller mentioned that...", "The agent explained that..."). Include all substantive dialogue and key points, but present as a cohesive summary narrative rather than direct quotes or speaker labels.
 - Return ONLY valid JSON.
 """
 
@@ -208,11 +217,24 @@ CRITICAL rules:
         if extracted_data.get("action_required") != "Yes":
             extracted_data["action_description"] = None
         # Output order: source_type first, then rest in consistent order
+        _outcome_allowed = frozenset({
+            "CALLBACK", "BOOKED", "RESCHEDULED", "INFORMATION CALL", "FOLLOWUP",
+            "NOANSWER", "DROPPED", "ESCALATED", "RESOLVED", "CANCELLED", "UNKNOWN"
+        })
+        raw_outcome = extracted_data.get("outcome")
+        if raw_outcome is not None and str(raw_outcome).strip():
+            normalized = str(raw_outcome).strip().upper()
+            if normalized in _outcome_allowed:
+                extracted_data["outcome"] = normalized
+            else:
+                extracted_data["outcome"] = "UNKNOWN"
+        else:
+            extracted_data["outcome"] = "UNKNOWN"
         key_order = (
             "source_type", "recordType", "call_classification", "action_required", "action_description",
             "department_to_handle", "priority", "ticket_notes", "LeadNotes", "call_solution", "transcript",
             "customer_name", "phone_number", "location", "department", "services", "follow_up_required",
-            "hospital_name", "doctor_name", "sentiment_label", "sentiment_summary", "timestamp"
+            "hospital_name", "doctor_name", "sentiment_label", "sentiment_summary", "outcome", "timestamp"
         )
         ordered = {k: extracted_data[k] for k in key_order if k in extracted_data}
         for k, v in extracted_data.items():

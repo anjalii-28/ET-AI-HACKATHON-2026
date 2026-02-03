@@ -340,6 +340,16 @@ body {
   animation: pulse 2s infinite;
 }
 
+.outcome-badge {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background-color: #e0e7ff;
+  color: #3730a3;
+}
+
 @keyframes pulse {
   0%, 100% {
     opacity: 1;
@@ -524,6 +534,12 @@ body {
 .detail-value.action-no {
   color: #065f46;
   font-weight: 600;
+}
+
+.detail-value.outcome-value {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
 }
 
 .detail-text-content {

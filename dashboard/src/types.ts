@@ -13,6 +13,8 @@ export interface CallData {
   transcript?: string | null;
   action_required?: boolean | string;
   action_description?: string | null;
+  /** Outcome: one word from allowed enum (CALLBACK, BOOKED, RESCHEDULED, INFORMATION CALL, FOLLOWUP, NOANSWER, DROPPED, ESCALATED, RESOLVED, CANCELLED, UNKNOWN) */
+  outcome?: string | null;
   sentiment_label?: string;
   sentiment_summary?: string;
   follow_ups?: string[] | string;

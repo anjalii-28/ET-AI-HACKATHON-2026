@@ -375,6 +375,9 @@ export function CallList({ calls, onCallSelect, searchQuery }: CallListProps) {
                     {actionRequired && (
                       <span className="action-badge">ACTION REQUIRED</span>
                     )}
+                    {call.outcome && (
+                      <span className="outcome-badge">{call.outcome}</span>
+                    )}
                   </div>
                 </div>
                 <div className="call-row-details">

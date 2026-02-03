@@ -253,43 +253,45 @@ export function CallDetail({ call, onClose }: CallDetailProps) {
           )}
 
           {/* Contact Information */}
-          {(call.customer_name || call.doctor_name || call.hospital_name || call.department || call.services) && (
-            <section className="detail-section">
-              <h3>Contact Information</h3>
-              <div className="detail-grid">
-                {call.customer_name && (
-                  <div className="detail-item">
-                    <span className="detail-label">Customer:</span>
-                    <span className="detail-value">{call.customer_name}</span>
-                  </div>
-                )}
-                {call.doctor_name && (
-                  <div className="detail-item">
-                    <span className="detail-label">Doctor:</span>
-                    <span className="detail-value">{call.doctor_name}</span>
-                  </div>
-                )}
-                {call.hospital_name && (
-                  <div className="detail-item">
-                    <span className="detail-label">Hospital:</span>
-                    <span className="detail-value">{call.hospital_name}</span>
-                  </div>
-                )}
-                {call.department && (
-                  <div className="detail-item">
-                    <span className="detail-label">Department:</span>
-                    <span className="detail-value">{String(call.department)}</span>
-                  </div>
-                )}
-                {call.services && (
-                  <div className="detail-item full-width">
-                    <span className="detail-label">Services:</span>
-                    <span className="detail-value">{String(call.services)}</span>
-                  </div>
-                )}
+          <section className="detail-section">
+            <h3>Contact Information</h3>
+            <div className="detail-grid">
+              {call.customer_name && (
+                <div className="detail-item">
+                  <span className="detail-label">Customer:</span>
+                  <span className="detail-value">{call.customer_name}</span>
+                </div>
+              )}
+              {call.doctor_name && (
+                <div className="detail-item">
+                  <span className="detail-label">Doctor:</span>
+                  <span className="detail-value">{call.doctor_name}</span>
+                </div>
+              )}
+              {call.hospital_name && (
+                <div className="detail-item">
+                  <span className="detail-label">Hospital:</span>
+                  <span className="detail-value">{call.hospital_name}</span>
+                </div>
+              )}
+              {call.department && (
+                <div className="detail-item">
+                  <span className="detail-label">Department:</span>
+                  <span className="detail-value">{String(call.department)}</span>
+                </div>
+              )}
+              {call.services && (
+                <div className="detail-item full-width">
+                  <span className="detail-label">Services:</span>
+                  <span className="detail-value">{String(call.services)}</span>
+                </div>
+              )}
+              <div className="detail-item">
+                <span className="detail-label">Outcome:</span>
+                <span className="detail-value outcome-value">{call.outcome?.trim() || 'UNKNOWN'}</span>
               </div>
-            </section>
-          )}
+            </div>
+          </section>
         </div>
       </div>
     </div>
