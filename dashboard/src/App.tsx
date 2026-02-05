@@ -11,6 +11,7 @@ function App() {
   const [selectedCall, setSelectedCall] = useState<CallData | null>(null);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [focusMode, setFocusMode] = useState(false);
 
   useEffect(() => {
     async function fetchData() {
@@ -46,14 +47,14 @@ function App() {
       <header className="app-header">
         <div className="header-content">
           <div className="header-title">
-            <h1>Call Processing Report Dashboard</h1>
-            <p className="subtitle">Intelligence reports for processed calls</p>
+            <h1>Call Intelligence</h1>
+            <p className="subtitle">Processed call reports for QA and operations</p>
           </div>
           <div className="header-search">
             <input
               type="text"
               className="global-search-input"
-              placeholder="Search transcript, notes, names, department, services, filename…"
+              placeholder="Search notes, resolution, doctor, hospital"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
@@ -62,8 +63,8 @@ function App() {
       </header>
 
       <main className="app-main">
-        <ProcessingOverview stats={stats} />
-        <CallList calls={calls} onCallSelect={setSelectedCall} searchQuery={searchQuery} />
+        <ProcessingOverview stats={stats} calls={calls} />
+        <CallList calls={calls} onCallSelect={setSelectedCall} searchQuery={searchQuery} focusMode={focusMode} onFocusModeChange={setFocusMode} />
       </main>
 
       {selectedCall && (

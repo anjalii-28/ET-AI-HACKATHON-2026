@@ -1,84 +1,87 @@
 import { CallData } from '../types';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
+import {
+  isActionRequired,
+  isHighAnxiety,
+  getWaitingSince,
+  getSLARemaining,
+  getLastTouched,
+  getRiskScore,
+  getWhyThisMatters,
+  getConsequenceHint,
+  getHistorySignals,
+  getFollowUpReason,
+  FOLLOW_UP_REASONS,
+} from '../utils/callIntelligence';
 
 interface CallListProps {
   calls: CallData[];
   onCallSelect: (call: CallData) => void;
   searchQuery: string;
+  focusMode: boolean;
+  onFocusModeChange: (v: boolean) => void;
 }
 
 type FilterType = 'ALL' | 'LEAD' | 'TICKET';
-type SortType = 'timestamp-desc' | 'timestamp-asc' | 'action-required';
+type SortType = 'impact' | 'latest' | 'oldest';
 
-// Extract call category from filename
-function extractCallCategory(filename?: string): string {
+function extractCallCategoryFromFilename(filename?: string): string {
   if (!filename) return 'OTHER';
-  
   const upper = filename.toUpperCase();
-  
-  // Check for known patterns in filename
-  if (upper.includes('POST_DISCHARGE') || upper.includes('POSTDISCHARGE')) {
-    return 'POST_DISCHARGE';
-  }
-  if (upper.includes('EMERGENCY')) {
-    return 'EMERGENCY';
-  }
-  if (upper.includes('HOMECARE') || upper.includes('HOME_CARE')) {
-    return 'CUSTOMER_CARE';
-  }
-  if (upper.includes('APPOINTMENT') || upper.includes('APPT')) {
-    return 'APPOINTMENT';
-  }
-  if (upper.includes('CUSTOMER_CARE') || upper.includes('CUSTOMERCARE')) {
-    return 'CUSTOMER_CARE';
-  }
-  
-  // Default to OTHER if no category found
+  if (upper.includes('POST_DISCHARGE') || upper.includes('POSTDISCHARGE')) return 'POST_DISCHARGE';
+  if (upper.includes('EMERGENCY')) return 'EMERGENCY';
+  if (upper.includes('HOMECARE') || upper.includes('HOME_CARE')) return 'CUSTOMER_CARE';
+  if (upper.includes('APPOINTMENT') || upper.includes('APPT')) return 'APPOINTMENT';
+  if (upper.includes('CUSTOMER_CARE') || upper.includes('CUSTOMERCARE')) return 'CUSTOMER_CARE';
   return 'OTHER';
 }
 
-export function CallList({ calls, onCallSelect, searchQuery }: CallListProps) {
+export function CallList({ calls, onCallSelect, searchQuery, focusMode, onFocusModeChange }: CallListProps) {
   const [filter, setFilter] = useState<FilterType>('ALL');
-  const [sortBy, setSortBy] = useState<SortType>('timestamp-desc');
+  const [sortBy, setSortBy] = useState<SortType>('impact');
   const [actionRequiredFilter, setActionRequiredFilter] = useState<'ALL' | 'YES' | 'NO'>('ALL');
   const [callClassificationFilter, setCallClassificationFilter] = useState<string>('ALL');
   const [sentimentFilter, setSentimentFilter] = useState<string>('ALL');
   const [hospitalFilter, setHospitalFilter] = useState<string>('ALL');
   const [callCategoryFilter, setCallCategoryFilter] = useState<string>('ALL');
+  const [followUpReasonFilter, setFollowUpReasonFilter] = useState<string>('ALL');
+  const [quickFilter, setQuickFilter] = useState<'all' | 'action' | 'anxiety' | 'repeat'>('all');
+  const [now, setNow] = useState(() => Date.now());
 
-  // Extract unique values for dynamic filters
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 60 * 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const phoneCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    calls.forEach((c) => {
+      const phone = c.phone_number?.trim();
+      if (phone) m.set(phone, (m.get(phone) || 0) + 1);
+    });
+    return m;
+  }, [calls]);
+
   const uniqueValues = useMemo(() => {
     const classifications = new Set<string>();
     const sentiments = new Set<string>();
     const hospitals = new Set<string>();
     const categories = new Set<string>();
-
     calls.forEach((call) => {
-      if (call.call_classification) {
-        classifications.add(call.call_classification);
-      }
-      if (call.sentiment_label) {
-        sentiments.add(call.sentiment_label);
-      }
-      if (call.hospital_name) {
-        hospitals.add(call.hospital_name);
-      }
-      // Extract category from filename
-      const category = extractCallCategory(call.filename);
-      categories.add(category);
+      if (call.call_classification) classifications.add(call.call_classification);
+      if (call.sentiment_label) sentiments.add(call.sentiment_label);
+      if (call.hospital_name) hospitals.add(call.hospital_name);
+      categories.add(extractCallCategoryFromFilename(call.filename));
     });
-
-    // Sort categories in a specific order
     const categoryOrder = ['APPOINTMENT', 'CUSTOMER_CARE', 'EMERGENCY', 'POST_DISCHARGE', 'OTHER'];
     const sortedCategories = Array.from(categories).sort((a, b) => {
-      const indexA = categoryOrder.indexOf(a);
-      const indexB = categoryOrder.indexOf(b);
-      if (indexA === -1 && indexB === -1) return a.localeCompare(b);
-      if (indexA === -1) return 1;
-      if (indexB === -1) return -1;
-      return indexA - indexB;
+      const iA = categoryOrder.indexOf(a);
+      const iB = categoryOrder.indexOf(b);
+      if (iA === -1 && iB === -1) return a.localeCompare(b);
+      if (iA === -1) return 1;
+      if (iB === -1) return -1;
+      return iA - iB;
     });
-
     return {
       classifications: Array.from(classifications).sort(),
       sentiments: Array.from(sentiments).sort(),
@@ -90,311 +93,333 @@ export function CallList({ calls, onCallSelect, searchQuery }: CallListProps) {
   const filteredAndSortedCalls = useMemo(() => {
     let filtered = [...calls];
 
-    // Filter by recordType (TICKET_CONFUSION is treated as TICKET)
     if (filter !== 'ALL') {
       filtered = filtered.filter((call) => {
-        const recordType = call.recordType?.toUpperCase();
-        if (filter === 'TICKET') {
-          return recordType === 'TICKET' || recordType === 'TICKET_CONFUSION' || recordType === 'CONFUSION';
-        }
-        return recordType === filter;
+        const rt = call.recordType?.toUpperCase();
+        if (filter === 'TICKET') return rt === 'TICKET' || rt === 'TICKET_CONFUSION' || rt === 'CONFUSION';
+        return rt === filter;
       });
     }
 
-    // Filter by action required
+    if (quickFilter === 'action') {
+      filtered = filtered.filter(isActionRequired);
+    } else if (quickFilter === 'anxiety') {
+      filtered = filtered.filter(isHighAnxiety);
+    } else if (quickFilter === 'repeat') {
+      filtered = filtered.filter((c) => (c.phone_number && (phoneCounts.get(c.phone_number.trim()) || 0) >= 2));
+    }
+
     if (actionRequiredFilter === 'YES') {
-      filtered = filtered.filter((call) => {
-        const actionReq = call.action_required;
-        if (typeof actionReq === 'boolean') {
-          return actionReq === true;
-        }
-        if (typeof actionReq === 'string') {
-          const upper = String(actionReq).trim().toUpperCase();
-          // Check for various "action required" patterns
-          // CALLBACK_REQUIRED should definitely match
-          return (
-            upper === 'TRUE' ||
-            upper === 'YES' ||
-            upper === 'CALLBACK_REQUIRED' ||
-            upper === 'ACTION_REQUIRED' ||
-            upper === 'REQUIRED' ||
-            upper.includes('REQUIRED') ||
-            upper.includes('CALLBACK') ||
-            (upper.includes('ACTION') && !upper.includes('NO_ACTION'))
-          );
-        }
-        return false;
-      });
+      filtered = filtered.filter(isActionRequired);
     } else if (actionRequiredFilter === 'NO') {
-      filtered = filtered.filter((call) => {
-        const actionReq = call.action_required;
-        if (typeof actionReq === 'boolean') {
-          return actionReq === false;
-        }
-        if (typeof actionReq === 'string') {
-          const upper = String(actionReq).trim().toUpperCase();
-          // Check for various "no action" patterns
-          return (
-            upper === 'FALSE' ||
-            upper === 'NO' ||
-            upper === 'NO_ACTION' ||
-            upper === 'NO_ACTION_REQUIRED' ||
-            upper === 'NONE' ||
-            upper.includes('NO_ACTION')
-          );
-        }
-        // undefined/null treated as no action
-        return !actionReq;
-      });
+      filtered = filtered.filter((c) => !isActionRequired(c));
     }
 
-    // Filter by call_classification
     if (callClassificationFilter !== 'ALL') {
-      filtered = filtered.filter((call) => call.call_classification === callClassificationFilter);
+      filtered = filtered.filter((c) => c.call_classification === callClassificationFilter);
     }
-
-    // Filter by sentiment_label
     if (sentimentFilter !== 'ALL') {
-      filtered = filtered.filter((call) => call.sentiment_label === sentimentFilter);
+      filtered = filtered.filter((c) => c.sentiment_label === sentimentFilter);
     }
-
-    // Filter by hospital_name
     if (hospitalFilter !== 'ALL') {
-      filtered = filtered.filter((call) => call.hospital_name === hospitalFilter);
+      filtered = filtered.filter((c) => c.hospital_name === hospitalFilter);
     }
-
-    // Filter by call category
     if (callCategoryFilter !== 'ALL') {
-      filtered = filtered.filter((call) => {
-        const category = extractCallCategory(call.filename);
-        return category === callCategoryFilter;
-      });
+      filtered = filtered.filter((c) => extractCallCategoryFromFilename(c.filename) === callCategoryFilter);
     }
 
-    // Apply search query (case-insensitive) across all text fields so we can find everything
+    if (followUpReasonFilter !== 'ALL') {
+      filtered = filtered.filter((c) => getFollowUpReason(c).reason === followUpReasonFilter);
+    }
+
     if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase().trim();
-      const terms = query.split(/\s+/).filter(Boolean);
+      const q = searchQuery.toLowerCase().trim();
       filtered = filtered.filter((call) => {
-        const searchFields: (string | undefined | null)[] = [
+        const fields = [
           call.notes,
-          call.LeadNotes,
-          call.ticket_notes,
-          call.call_solution,
           call.ticket_solution,
-          call.transcript,
           call.sentiment_summary,
           call.customer_name,
           call.doctor_name,
           call.hospital_name,
-          call.department,
-          call.services,
-          call.call_classification,
-          call.filename,
-          call.location,
-          call.action_description,
+          call.LeadNotes,
+          (call as { ticket_notes?: string }).ticket_notes,
         ];
-        const searchableText = searchFields
-          .filter((f) => f != null && String(f).trim() !== '')
-          .map((f) => String(f).toLowerCase())
-          .join(' ');
-        return terms.every((term) => searchableText.includes(term));
+        return fields.some((f) => f && String(f).toLowerCase().includes(q));
       });
     }
 
-    // Sort
     filtered.sort((a, b) => {
-      if (sortBy === 'timestamp-desc') {
-        const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
-        const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
-        return timeB - timeA;
-      } else if (sortBy === 'timestamp-asc') {
-        const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
-        const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
-        return timeA - timeB;
-      } else if (sortBy === 'action-required') {
-        const aAction = a.action_required === true || a.action_required === 'true' || a.action_required === 'yes' || a.action_required === 'YES';
-        const bAction = b.action_required === true || b.action_required === 'true' || b.action_required === 'yes' || b.action_required === 'YES';
-        return aAction === bAction ? 0 : aAction ? -1 : 1;
+      if (sortBy === 'impact') {
+        const isRepeatA = a.phone_number && (phoneCounts.get(a.phone_number.trim()) || 0) >= 2;
+        const isRepeatB = b.phone_number && (phoneCounts.get(b.phone_number.trim()) || 0) >= 2;
+        const waitA = a.timestamp ? now - new Date(a.timestamp).getTime() : 0;
+        const waitB = b.timestamp ? now - new Date(b.timestamp).getTime() : 0;
+        const countA = phoneCounts.get(a.phone_number?.trim() || '') || 1;
+        const countB = phoneCounts.get(b.phone_number?.trim() || '') || 1;
+        const { score: scoreA } = getRiskScore(a, !!isRepeatA, waitA, countA);
+        const { score: scoreB } = getRiskScore(b, !!isRepeatB, waitB, countB);
+        return scoreB - scoreA;
       }
-      return 0;
+      const tA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+      const tB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+      return sortBy === 'oldest' ? tA - tB : tB - tA;
     });
 
     return filtered;
-  }, [calls, filter, sortBy, actionRequiredFilter, callClassificationFilter, sentimentFilter, hospitalFilter, callCategoryFilter, searchQuery]);
+  }, [
+    calls,
+    filter,
+    sortBy,
+    actionRequiredFilter,
+    callClassificationFilter,
+    followUpReasonFilter,
+    sentimentFilter,
+    hospitalFilter,
+    callCategoryFilter,
+    searchQuery,
+    quickFilter,
+    phoneCounts,
+    focusMode,
+    now,
+  ]);
 
   const getSentimentColor = (sentiment?: string): string => {
-    if (!sentiment) return '#666';
+    if (!sentiment) return '#64748b';
     const s = sentiment.toLowerCase();
-    if (s.includes('positive') || s.includes('happy')) return '#10b981';
-    if (s.includes('negative') || s.includes('angry') || s.includes('frustrated')) return '#ef4444';
-    if (s.includes('neutral')) return '#6b7280';
-    return '#f59e0b';
-  };
-
-  const formatTimestamp = (timestamp?: string): string => {
-    if (!timestamp) return 'N/A';
-    try {
-      const date = new Date(timestamp);
-      return date.toLocaleString();
-    } catch {
-      return timestamp;
-    }
+    if (s.includes('positive') || s.includes('happy')) return '#059669';
+    if (s.includes('negative') || s.includes('angry') || s.includes('frustrated')) return '#dc2626';
+    if (s.includes('neutral')) return '#64748b';
+    return '#d97706';
   };
 
   const getRecordTypeClass = (recordType?: string): string => {
     if (!recordType) return 'unknown';
-    const upper = recordType.toUpperCase();
-    if (upper === 'TICKET' || upper === 'TICKET_CONFUSION' || upper === 'CONFUSION') {
-      return 'ticket';
-    }
+    const u = recordType.toUpperCase();
+    if (u === 'TICKET' || u === 'TICKET_CONFUSION' || u === 'CONFUSION') return 'ticket';
     return recordType.toLowerCase();
   };
 
   const getDisplayRecordType = (recordType?: string): string => {
     if (!recordType) return 'UNKNOWN';
-    const upper = recordType.toUpperCase();
-    if (upper === 'TICKET_CONFUSION' || upper === 'CONFUSION') {
-      return 'TICKET';
-    }
+    const u = recordType.toUpperCase();
+    if (u === 'TICKET_CONFUSION' || u === 'CONFUSION') return 'TICKET';
     return recordType;
   };
 
   return (
-    <div className="call-list-section">
+    <section className={`dashboard-section calls-section ${focusMode ? 'focus-mode' : ''}`}>
+      <h2 className="section-heading">Calls</h2>
+      <div className="call-list-card">
       <div className="filters-bar">
+        <div className="quick-filters-row">
+          <div className="quick-filters">
+            <button
+              className={`quick-filter-chip ${quickFilter === 'all' ? 'active' : ''}`}
+              onClick={() => setQuickFilter('all')}
+            >
+              All calls
+            </button>
+            <button
+              className={`quick-filter-chip ${quickFilter === 'action' ? 'active' : ''}`}
+              onClick={() => setQuickFilter('action')}
+            >
+              Needs action now
+            </button>
+            <button
+              className={`quick-filter-chip ${quickFilter === 'anxiety' ? 'active' : ''}`}
+              onClick={() => setQuickFilter('anxiety')}
+            >
+              High anxiety
+            </button>
+            <button
+              className={`quick-filter-chip ${quickFilter === 'repeat' ? 'active' : ''}`}
+              onClick={() => setQuickFilter('repeat')}
+            >
+              Repeat callers
+            </button>
+          </div>
+          <label className="focus-mode-toggle">
+            <input
+              type="checkbox"
+              checked={focusMode}
+              onChange={(e) => onFocusModeChange(e.target.checked)}
+            />
+            <span className="focus-mode-label">
+              Focus Mode: Critical only
+            </span>
+          </label>
+        </div>
+
         <div className="filters-row">
           <div className="filter-group">
-            <label>Record Type:</label>
+            <label>Record type</label>
             <select value={filter} onChange={(e) => setFilter(e.target.value as FilterType)}>
               <option value="ALL">All</option>
               <option value="LEAD">Lead</option>
               <option value="TICKET">Ticket</option>
             </select>
           </div>
-
           <div className="filter-group">
-            <label>Action Required:</label>
+            <label>Action required</label>
             <select value={actionRequiredFilter} onChange={(e) => setActionRequiredFilter(e.target.value as 'ALL' | 'YES' | 'NO')}>
               <option value="ALL">All</option>
               <option value="YES">Yes</option>
               <option value="NO">No</option>
             </select>
           </div>
-
           <div className="filter-group">
-            <label>Classification:</label>
+            <label>Classification</label>
             <select value={callClassificationFilter} onChange={(e) => setCallClassificationFilter(e.target.value)}>
               <option value="ALL">All</option>
-              {uniqueValues.classifications.map((classification) => (
-                <option key={classification} value={classification}>
-                  {classification}
-                </option>
+              {uniqueValues.classifications.map((c) => (
+                <option key={c} value={c}>{c}</option>
               ))}
             </select>
           </div>
-
           <div className="filter-group">
-            <label>Sentiment:</label>
+            <label>Sentiment</label>
             <select value={sentimentFilter} onChange={(e) => setSentimentFilter(e.target.value)}>
               <option value="ALL">All</option>
-              {uniqueValues.sentiments.map((sentiment) => (
-                <option key={sentiment} value={sentiment}>
-                  {sentiment}
-                </option>
+              {uniqueValues.sentiments.map((s) => (
+                <option key={s} value={s}>{s}</option>
               ))}
             </select>
           </div>
-
           <div className="filter-group">
-            <label>Hospital:</label>
+            <label>Hospital</label>
             <select value={hospitalFilter} onChange={(e) => setHospitalFilter(e.target.value)}>
               <option value="ALL">All</option>
-              {uniqueValues.hospitals.map((hospital) => (
-                <option key={hospital} value={hospital}>
-                  {hospital}
-                </option>
+              {uniqueValues.hospitals.map((h) => (
+                <option key={h} value={h}>{h}</option>
               ))}
             </select>
           </div>
-
           <div className="filter-group">
-            <label>Call Category:</label>
+            <label>Category</label>
             <select value={callCategoryFilter} onChange={(e) => setCallCategoryFilter(e.target.value)}>
               <option value="ALL">All</option>
-              {uniqueValues.categories.map((category) => (
-                <option key={category} value={category}>
-                  {category.replace(/_/g, ' ')}
-                </option>
+              {uniqueValues.categories.map((c) => (
+                <option key={c} value={c}>{c.replace(/_/g, ' ')}</option>
               ))}
             </select>
           </div>
-
           <div className="filter-group">
-            <label>Sort By:</label>
-            <select value={sortBy} onChange={(e) => setSortBy(e.target.value as SortType)}>
-              <option value="timestamp-desc">Latest First</option>
-              <option value="timestamp-asc">Oldest First</option>
-              <option value="action-required">Action Required First</option>
+            <label>Next Action</label>
+            <select value={followUpReasonFilter} onChange={(e) => setFollowUpReasonFilter(e.target.value)}>
+              <option value="ALL">All</option>
+              {FOLLOW_UP_REASONS.filter((r) => r !== 'Unclear').map((r) => (
+                <option key={r} value={r}>{r}</option>
+              ))}
+              <option value="Unclear">Unclear</option>
             </select>
           </div>
-        </div>
-
-        <div className="results-count">
-          Showing {filteredAndSortedCalls.length} of {calls.length} calls
-          {searchQuery.trim() && ` (filtered by search)`}
+          <div className="filter-group">
+            <label>Sort by</label>
+            <select value={sortBy} onChange={(e) => setSortBy(e.target.value as SortType)}>
+              <option value="impact">Risk first</option>
+              <option value="latest">Latest first</option>
+              <option value="oldest">Oldest first</option>
+            </select>
+          </div>
+          <div className="results-count">
+            {filteredAndSortedCalls.length} of {calls.length} calls
+            {focusMode && ' (critical only)'}
+          </div>
         </div>
       </div>
 
       <div className="call-list">
         {filteredAndSortedCalls.length === 0 ? (
           <div className="empty-state">
-            {searchQuery.trim() 
-              ? 'No calls match your search and filters.' 
-              : 'No calls match the selected filters.'}
+            {focusMode
+              ? 'No critical calls. Turn off Focus Mode to see all.'
+              : searchQuery.trim() || quickFilter !== 'all'
+                ? 'No calls match your filters or search.'
+                : 'No calls loaded.'}
           </div>
         ) : (
           filteredAndSortedCalls.map((call, index) => {
-            const actionRequired = call.action_required === true || call.action_required === 'true' || call.action_required === 'yes' || call.action_required === 'YES';
-            const callKey = call.filename || `call-${index}`;
+            const actionReq = isActionRequired(call);
+            const phoneCount = phoneCounts.get(call.phone_number?.trim() || '') || 1;
+            const isRepeat = phoneCount >= 2;
+            const waiting = getWaitingSince(call.timestamp, now);
+            const sla = getSLARemaining(call.timestamp, call.filename, now);
+            const lastTouched = getLastTouched(call.timestamp, now);
+            const { score: riskScore, tier: riskTier } = getRiskScore(call, isRepeat, waiting.ms, phoneCount);
+            const whyMatters = getWhyThisMatters(call, phoneCount);
+            const consequence = getConsequenceHint(call, riskScore, isRepeat);
+            const historySignals = getHistorySignals(call, phoneCount);
+            const { reason: followUpReason } = getFollowUpReason(call);
+            const callerName = call.customer_name || 'Unknown caller';
+            const isCritical = riskTier === 'high' || (actionReq && riskTier === 'medium');
+            const rt = (call.recordType || '').toUpperCase();
+            const isTicket = rt === 'TICKET' || rt === 'TICKET_CONFUSION' || rt === 'CONFUSION';
+
             return (
               <div
-                key={callKey}
-                className={`call-row ${actionRequired ? 'action-required' : ''}`}
+                key={call.filename || `call-${index}`}
+                className={`call-row ${actionReq ? 'action-required' : ''} ${focusMode && isCritical ? 'focus-mode-row' : ''}`}
                 onClick={() => onCallSelect(call)}
               >
+                <div className="call-row-risk">
+                  <span className={`risk-score risk-${riskTier}`} title={`Risk score: ${riskScore}/100`}>
+                    {riskScore}
+                  </span>
+                  <span className="risk-tier">{riskTier}</span>
+                </div>
+
                 <div className="call-row-main">
-                  <div className="call-filename">{call.filename || `Call ${index + 1}`}</div>
-                  <div className="call-metadata">
+                  <div className="call-row-header">
+                    <span className="call-row-caller">{callerName}</span>
+                    {historySignals.map((sig, i) => (
+                      <span key={i} className="history-signal" title={sig.label}>
+                        {sig.short}
+                      </span>
+                    ))}
+                  </div>
+                  <div className="call-row-why">{whyMatters}</div>
+                  {consequence && (
+                    <div className="call-row-consequence">If ignored: {consequence}</div>
+                  )}
+                  <div className="call-row-time">
+                    <span title="Waiting since call received">Waiting: {waiting.text}</span>
+                    <span className={`sla-badge sla-${sla.urgency}`} title="SLA countdown">
+                      {sla.text}
+                    </span>
+                    <span title="Last activity">Last: {lastTouched}</span>
+                  </div>
+                </div>
+
+                <div className="call-row-meta">
+                  <div className="call-row-badges">
                     <span className={`record-type-badge ${getRecordTypeClass(call.recordType)}`}>
                       {getDisplayRecordType(call.recordType)}
                     </span>
+                    {(isTicket || actionReq) && (
+                      <span className={`reason-tag reason-${followUpReason.toLowerCase().replace(/\s+/g, '-')}`} title={`Next Action: ${followUpReason}`}>
+                        {followUpReason}
+                      </span>
+                    )}
                     {call.call_classification && (
                       <span className="classification-badge">{call.call_classification}</span>
                     )}
-                    {actionRequired && (
-                      <span className="action-badge">ACTION REQUIRED</span>
-                    )}
-                    {call.outcome && (
-                      <span className="outcome-badge">{call.outcome}</span>
-                    )}
+                    {actionReq && <span className="action-badge">Action</span>}
                   </div>
-                </div>
-                <div className="call-row-details">
-                  <div className="sentiment-indicator">
+                  <div className="sentiment-pill">
                     <span
                       className="sentiment-dot"
                       style={{ backgroundColor: getSentimentColor(call.sentiment_label) }}
                     />
-                    <span>{call.sentiment_label || 'Unknown'}</span>
+                    {call.sentiment_label || 'Unknown'}
                   </div>
-                  <div className="call-timestamp">{formatTimestamp(call.timestamp)}</div>
                 </div>
               </div>
             );
           })
         )}
       </div>
-    </div>
+      </div>
+    </section>
   );
 }

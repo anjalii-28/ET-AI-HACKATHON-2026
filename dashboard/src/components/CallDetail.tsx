@@ -1,4 +1,5 @@
 import { CallData } from '../types';
+import { getFollowUpReason } from '../utils/callIntelligence';
 
 interface CallDetailProps {
   call: CallData | null;
@@ -31,14 +32,15 @@ export function CallDetail({ call, onClose }: CallDetailProps) {
   };
 
   const actionRequired = getActionRequired(call.action_required);
+  const followUpReason = (call.recordType?.toUpperCase() === 'TICKET' || actionRequired) ? getFollowUpReason(call).reason : null;
   
   const getSentimentColor = (sentiment?: string): string => {
-    if (!sentiment) return '#666';
+    if (!sentiment) return '#64748b';
     const s = sentiment.toLowerCase();
-    if (s.includes('positive') || s.includes('happy')) return '#10b981';
-    if (s.includes('negative') || s.includes('angry') || s.includes('frustrated')) return '#ef4444';
-    if (s.includes('neutral')) return '#6b7280';
-    return '#f59e0b';
+    if (s.includes('positive') || s.includes('happy')) return '#34d399';
+    if (s.includes('negative') || s.includes('angry') || s.includes('frustrated')) return '#f87171';
+    if (s.includes('neutral')) return '#94a3b8';
+    return '#fbbf24';
   };
 
   const formatTimestamp = (timestamp?: string): string => {
@@ -117,17 +119,6 @@ export function CallDetail({ call, onClose }: CallDetailProps) {
     return recordType;
   };
 
-  // Unified notes: pipeline uses LeadNotes (lead) or ticket_notes (ticket), UI may use notes
-  const summaryNotes = call.notes ?? call.LeadNotes ?? call.ticket_notes ?? null;
-  const solutionText = call.call_solution ?? call.ticket_solution ?? null;
-  // Transcript: full transcript from pipeline, or combined summary for older data
-  const transcriptText =
-    (call.transcript && String(call.transcript).trim()) ||
-    [summaryNotes, solutionText, call.sentiment_summary]
-      .filter(Boolean)
-      .map((s) => String(s).trim())
-      .join('\n\n');
-
   return (
     <div className="call-detail-overlay" onClick={onClose}>
       <div className="call-detail-content" onClick={(e) => e.stopPropagation()}>
@@ -178,27 +169,19 @@ export function CallDetail({ call, onClose }: CallDetailProps) {
             </div>
           </section>
 
-          {/* Transcript (full call content) */}
-          {transcriptText && (
-            <section className="detail-section">
-              <h3>Transcript</h3>
-              <div className="detail-text-content detail-transcript">{transcriptText}</div>
-            </section>
-          )}
-
-          {/* Call Summary (lead/ticket notes) */}
-          {summaryNotes && (
+          {/* Call Summary */}
+          {(call.notes || call.LeadNotes) && (
             <section className="detail-section">
               <h3>Call Summary</h3>
-              <div className="detail-text-content">{String(summaryNotes)}</div>
+              <div className="detail-text-content">{String(call.notes || call.LeadNotes || '')}</div>
             </section>
           )}
 
-          {/* What Happened / Solution */}
-          {solutionText && (
+          {/* Ticket Solution */}
+          {call.ticket_solution && (
             <section className="detail-section">
               <h3>What Happened in the Call</h3>
-              <div className="detail-text-content">{String(solutionText)}</div>
+              <div className="detail-text-content">{String(call.ticket_solution)}</div>
             </section>
           )}
 
@@ -229,14 +212,24 @@ export function CallDetail({ call, onClose }: CallDetailProps) {
             </section>
           )}
 
-          {/* Action Required */}
+          {/* Action Status */}
           <section className="detail-section">
             <h3>Action Status</h3>
-            <div className="detail-item">
-              <span className="detail-label">Action Required:</span>
-              <span className={`detail-value ${actionRequired ? 'action-yes' : 'action-no'}`}>
-                {actionRequired ? 'YES' : 'NO'}
-              </span>
+            <div className="detail-grid detail-grid-action">
+              <div className="detail-item">
+                <span className="detail-label">Action Required:</span>
+                <span className={`detail-value ${actionRequired ? 'action-yes' : 'action-no'}`}>
+                  {actionRequired ? 'YES' : 'NO'}
+                </span>
+              </div>
+              {followUpReason && (
+                <div className="detail-item">
+                  <span className="detail-label">Next Action:</span>
+                  <span className={`reason-tag reason-${followUpReason.toLowerCase().replace(/\s+/g, '-')}`}>
+                    {followUpReason}
+                  </span>
+                </div>
+              )}
             </div>
           </section>
 
@@ -253,45 +246,43 @@ export function CallDetail({ call, onClose }: CallDetailProps) {
           )}
 
           {/* Contact Information */}
-          <section className="detail-section">
-            <h3>Contact Information</h3>
-            <div className="detail-grid">
-              {call.customer_name && (
-                <div className="detail-item">
-                  <span className="detail-label">Customer:</span>
-                  <span className="detail-value">{call.customer_name}</span>
-                </div>
-              )}
-              {call.doctor_name && (
-                <div className="detail-item">
-                  <span className="detail-label">Doctor:</span>
-                  <span className="detail-value">{call.doctor_name}</span>
-                </div>
-              )}
-              {call.hospital_name && (
-                <div className="detail-item">
-                  <span className="detail-label">Hospital:</span>
-                  <span className="detail-value">{call.hospital_name}</span>
-                </div>
-              )}
-              {call.department && (
-                <div className="detail-item">
-                  <span className="detail-label">Department:</span>
-                  <span className="detail-value">{String(call.department)}</span>
-                </div>
-              )}
-              {call.services && (
-                <div className="detail-item full-width">
-                  <span className="detail-label">Services:</span>
-                  <span className="detail-value">{String(call.services)}</span>
-                </div>
-              )}
-              <div className="detail-item">
-                <span className="detail-label">Outcome:</span>
-                <span className="detail-value outcome-value">{call.outcome?.trim() || 'UNKNOWN'}</span>
+          {(call.customer_name || call.doctor_name || call.hospital_name || call.department || call.services) && (
+            <section className="detail-section">
+              <h3>Contact Information</h3>
+              <div className="detail-grid">
+                {call.customer_name && (
+                  <div className="detail-item">
+                    <span className="detail-label">Customer:</span>
+                    <span className="detail-value">{call.customer_name}</span>
+                  </div>
+                )}
+                {call.doctor_name && (
+                  <div className="detail-item">
+                    <span className="detail-label">Doctor:</span>
+                    <span className="detail-value">{call.doctor_name}</span>
+                  </div>
+                )}
+                {call.hospital_name && (
+                  <div className="detail-item">
+                    <span className="detail-label">Hospital:</span>
+                    <span className="detail-value">{call.hospital_name}</span>
+                  </div>
+                )}
+                {call.department && (
+                  <div className="detail-item">
+                    <span className="detail-label">Department:</span>
+                    <span className="detail-value">{String(call.department)}</span>
+                  </div>
+                )}
+                {call.services && (
+                  <div className="detail-item full-width">
+                    <span className="detail-label">Services:</span>
+                    <span className="detail-value">{String(call.services)}</span>
+                  </div>
+                )}
               </div>
-            </div>
-          </section>
+            </section>
+          )}
         </div>
       </div>
     </div>

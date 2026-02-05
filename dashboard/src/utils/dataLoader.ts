@@ -117,11 +117,60 @@ export function calculateStats(calls: CallData[]): {
     if (recordType === 'LEAD') {
       stats.lead++;
     } else if (recordType === 'TICKET' || recordType === 'TICKET_CONFUSION' || recordType === 'CONFUSION') {
-      // TICKET_CONFUSION is treated as TICKET
       stats.ticket++;
     }
-    // Other types (PRANK, IVR, NO_ACTION_REQUIRED) are not counted separately
   });
 
   return stats;
+}
+
+function isActionRequired(call: CallData): boolean {
+  const actionReq = call.action_required;
+  if (typeof actionReq === 'boolean') return actionReq === true;
+  if (typeof actionReq === 'string') {
+    const upper = String(actionReq).trim().toUpperCase();
+    return (
+      upper === 'TRUE' || upper === 'YES' || upper === 'CALLBACK_REQUIRED' ||
+      upper === 'ACTION_REQUIRED' || upper.includes('REQUIRED') ||
+      upper.includes('CALLBACK') || (upper.includes('ACTION') && !upper.includes('NO_ACTION'))
+    );
+  }
+  return false;
+}
+
+function isHighAnxiety(call: CallData): boolean {
+  const s = (call.sentiment_label || '').toUpperCase();
+  return s.includes('ANXIOUS') || s.includes('NEGATIVE') || s.includes('FRUSTRATED') || s.includes('ANGRY');
+}
+
+export function calculateInsights(calls: CallData[]): {
+  total: number;
+  lead: number;
+  ticket: number;
+  needsAction: number;
+  highAnxiety: number;
+  repeatCallers: number;
+} {
+  const stats = calculateStats(calls);
+  let needsAction = 0;
+  let highAnxiety = 0;
+  const phoneCounts = new Map<string, number>();
+
+  calls.forEach((call) => {
+    if (isActionRequired(call)) needsAction++;
+    if (isHighAnxiety(call)) highAnxiety++;
+    const phone = call.phone_number?.trim();
+    if (phone) {
+      phoneCounts.set(phone, (phoneCounts.get(phone) || 0) + 1);
+    }
+  });
+
+  const repeatCallers = Array.from(phoneCounts.values()).filter((c) => c >= 2).length;
+
+  return {
+    ...stats,
+    needsAction,
+    highAnxiety,
+    repeatCallers,
+  };
 }
