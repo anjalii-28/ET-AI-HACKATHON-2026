@@ -160,6 +160,10 @@ body {
   color: var(--urgent);
 }
 
+.alert-item.alert-success {
+  color: var(--success);
+}
+
 /* AI section */
 .ai-section .ai-text {
   font-size: 0.9375rem;
@@ -898,6 +902,17 @@ body {
 .detail-value.action-no {
   color: var(--success);
   font-weight: 600;
+}
+
+.detail-value.detail-value-muted {
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+.detail-value.detail-value-prominent {
+  color: var(--text-primary);
+  font-weight: 600;
+  font-size: 1rem;
 }
 
 .detail-text-content {

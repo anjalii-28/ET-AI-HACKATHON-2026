@@ -1,5 +1,5 @@
 import { CallData } from '../types';
-import { getFollowUpReason } from '../utils/callIntelligence';
+import { getRelatedTo, getNextStep } from '../utils/callIntelligence';
 
 interface CallDetailProps {
   call: CallData | null;
@@ -32,7 +32,6 @@ export function CallDetail({ call, onClose }: CallDetailProps) {
   };
 
   const actionRequired = getActionRequired(call.action_required);
-  const followUpReason = (call.recordType?.toUpperCase() === 'TICKET' || actionRequired) ? getFollowUpReason(call).reason : null;
   
   const getSentimentColor = (sentiment?: string): string => {
     if (!sentiment) return '#64748b';
@@ -177,6 +176,14 @@ export function CallDetail({ call, onClose }: CallDetailProps) {
             </section>
           )}
 
+          {/* Transcript */}
+          {call.transcript && (
+            <section className="detail-section">
+              <h3>Transcript</h3>
+              <div className="detail-text-content">{call.transcript}</div>
+            </section>
+          )}
+
           {/* Ticket Solution */}
           {call.ticket_solution && (
             <section className="detail-section">
@@ -222,16 +229,35 @@ export function CallDetail({ call, onClose }: CallDetailProps) {
                   {actionRequired ? 'YES' : 'NO'}
                 </span>
               </div>
-              {followUpReason && (
-                <div className="detail-item">
-                  <span className="detail-label">Next Action:</span>
-                  <span className={`reason-tag reason-${followUpReason.toLowerCase().replace(/\s+/g, '-')}`}>
-                    {followUpReason}
-                  </span>
-                </div>
-              )}
             </div>
           </section>
+
+          {/* Ticket / Follow-up section */}
+          {(call.recordType?.toUpperCase() === 'TICKET' || actionRequired || call.follow_up_required) && (
+            <section className="detail-section">
+              <h3>Ticket / Follow-up</h3>
+              <div className="detail-grid">
+                {(() => {
+                  const relatedTo = getRelatedTo(call);
+                  return (
+                    <div className="detail-item">
+                      <span className="detail-label">Related to:</span>
+                      <span className="detail-value detail-value-muted">{relatedTo.value}</span>
+                    </div>
+                  );
+                })()}
+                {(() => {
+                  const nextStep = getNextStep(call);
+                  return nextStep ? (
+                    <div className="detail-item">
+                      <span className="detail-label">Next step:</span>
+                      <span className="detail-value detail-value-prominent">{nextStep}</span>
+                    </div>
+                  ) : null;
+                })()}
+              </div>
+            </section>
+          )}
 
           {/* Follow-ups */}
           {getFollowUps().length > 0 && (

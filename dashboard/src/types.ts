@@ -1,3 +1,24 @@
+export type RelatedToValue =
+  | 'Billing'
+  | 'Doctor Appointment'
+  | 'Prescription'
+  | 'Test Report'
+  | 'Insurance'
+  | 'Emergency'
+  | 'General Query'
+  | 'Unclear';
+
+export const RELATED_TO_VALUES: RelatedToValue[] = [
+  'Billing',
+  'Doctor Appointment',
+  'Prescription',
+  'Test Report',
+  'Insurance',
+  'Emergency',
+  'General Query',
+  'Unclear',
+];
+
 export interface CallData {
   call_classification?: string;
   recordType?: 'LEAD' | 'TICKET' | 'TICKET_CONFUSION' | 'CONFUSION' | 'PRANK' | 'IVR' | 'NO_ACTION_REQUIRED';
@@ -22,6 +43,9 @@ export interface CallData {
   services?: string;
   timestamp?: string;
   filename?: string;
+  relatedTo?: RelatedToValue;
+  nextStep?: string;
+  transcript?: string;
 }
 
 export interface ProcessingStats {

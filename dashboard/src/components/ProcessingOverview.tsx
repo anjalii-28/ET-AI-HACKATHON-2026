@@ -8,6 +8,8 @@ import {
   isActionRequired,
   getFollowUpReason,
   FOLLOW_UP_REASONS,
+  getRelatedTo,
+  getSLARemaining,
 } from '../utils/callIntelligence';
 
 interface ProcessingOverviewProps {
@@ -35,26 +37,47 @@ export function ProcessingOverview({ stats, calls }: ProcessingOverviewProps) {
     count: calls.filter((c) => getFollowUpReason(c).reason === reason).length,
   })).filter((r) => r.count > 0);
 
+  // Pending Billing callbacks: action-required calls with Related To = Billing
+  const pendingBillingCallbacks = calls.filter((c) => {
+    if (!isActionRequired(c)) return false;
+    const relatedTo = getRelatedTo(c);
+    return relatedTo.value === 'Billing';
+  }).length;
+
+  // Appointment follow-ups overdue: overdue appointment-related follow-ups
+  const now = Date.now();
+  const appointmentFollowUpsOverdue = calls.filter((c) => {
+    if (!isActionRequired(c)) return false;
+    const followUpReason = getFollowUpReason(c).reason;
+    if (followUpReason !== 'Appointment') return false;
+    const sla = getSLARemaining(c.timestamp, c.filename, now);
+    return sla.isOverdue;
+  }).length;
+
   return (
     <div className="overview-container">
       {/* Alerts section - compact, only when relevant */}
-      {hasAlerts && (
-        <section className="dashboard-section alerts-section">
-          <h2 className="section-heading">Alerts</h2>
-          <div className="alerts-bar">
-            {timePressure.breachIn1h > 0 && (
-              <span className="alert-item alert-urgent">
-                {timePressure.breachIn1h} call{timePressure.breachIn1h !== 1 ? 's' : ''} will breach SLA in 1h
-              </span>
-            )}
-            {timePressure.overdue > 0 && (
-              <span className="alert-item alert-overdue">
-                {timePressure.overdue} overdue follow-up{timePressure.overdue !== 1 ? 's' : ''}
-              </span>
-            )}
-          </div>
-        </section>
-      )}
+      <section className="dashboard-section alerts-section">
+        <h2 className="section-heading">Alerts</h2>
+        <div className="alerts-bar">
+          {hasAlerts ? (
+            <>
+              {timePressure.breachIn1h > 0 && (
+                <span className="alert-item alert-urgent">
+                  {timePressure.breachIn1h} call{timePressure.breachIn1h !== 1 ? 's' : ''} will breach SLA in 1h
+                </span>
+              )}
+              {timePressure.overdue > 0 && (
+                <span className="alert-item alert-overdue">
+                  {timePressure.overdue} overdue follow-up{timePressure.overdue !== 1 ? 's' : ''}
+                </span>
+              )}
+            </>
+          ) : (
+            <span className="alert-item alert-success">All callbacks on track</span>
+          )}
+        </div>
+      </section>
 
       {/* AI Insight - compact strip */}
       <section className="dashboard-section ai-section">
@@ -123,6 +146,18 @@ export function ProcessingOverview({ stats, calls }: ProcessingOverviewProps) {
                 <span className="workload-label">Oldest pending</span>
                 <span className="workload-value">{oldestText}</span>
               </div>
+              {pendingBillingCallbacks > 0 && (
+                <div className="workload-row">
+                  <span className="workload-label">Pending Billing callbacks</span>
+                  <span className="workload-value">{pendingBillingCallbacks}</span>
+                </div>
+              )}
+              {appointmentFollowUpsOverdue > 0 && (
+                <div className="workload-row">
+                  <span className="workload-label">Appointment follow-ups overdue</span>
+                  <span className="workload-value">{appointmentFollowUpsOverdue}</span>
+                </div>
+              )}
             </div>
             {reasonCounts.length > 0 && (
               <>

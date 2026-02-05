@@ -10,9 +10,10 @@ import {
   getWhyThisMatters,
   getConsequenceHint,
   getHistorySignals,
-  getFollowUpReason,
-  FOLLOW_UP_REASONS,
+  getRelatedTo,
+  getNextStep,
 } from '../utils/callIntelligence';
+import { RELATED_TO_VALUES } from '../types';
 
 interface CallListProps {
   calls: CallData[];
@@ -44,7 +45,8 @@ export function CallList({ calls, onCallSelect, searchQuery, focusMode, onFocusM
   const [sentimentFilter, setSentimentFilter] = useState<string>('ALL');
   const [hospitalFilter, setHospitalFilter] = useState<string>('ALL');
   const [callCategoryFilter, setCallCategoryFilter] = useState<string>('ALL');
-  const [followUpReasonFilter, setFollowUpReasonFilter] = useState<string>('ALL');
+  const [relatedToFilter, setRelatedToFilter] = useState<string>('ALL');
+  const [nextStepFilter, setNextStepFilter] = useState<string>('ALL');
   const [quickFilter, setQuickFilter] = useState<'all' | 'action' | 'anxiety' | 'repeat'>('all');
   const [now, setNow] = useState(() => Date.now());
 
@@ -67,11 +69,14 @@ export function CallList({ calls, onCallSelect, searchQuery, focusMode, onFocusM
     const sentiments = new Set<string>();
     const hospitals = new Set<string>();
     const categories = new Set<string>();
+    const nextSteps = new Set<string>();
     calls.forEach((call) => {
       if (call.call_classification) classifications.add(call.call_classification);
       if (call.sentiment_label) sentiments.add(call.sentiment_label);
       if (call.hospital_name) hospitals.add(call.hospital_name);
       categories.add(extractCallCategoryFromFilename(call.filename));
+      const nextStep = getNextStep(call);
+      if (nextStep) nextSteps.add(nextStep);
     });
     const categoryOrder = ['APPOINTMENT', 'CUSTOMER_CARE', 'EMERGENCY', 'POST_DISCHARGE', 'OTHER'];
     const sortedCategories = Array.from(categories).sort((a, b) => {
@@ -87,6 +92,7 @@ export function CallList({ calls, onCallSelect, searchQuery, focusMode, onFocusM
       sentiments: Array.from(sentiments).sort(),
       hospitals: Array.from(hospitals).sort(),
       categories: sortedCategories,
+      nextSteps: Array.from(nextSteps).sort(),
     };
   }, [calls]);
 
@@ -128,8 +134,15 @@ export function CallList({ calls, onCallSelect, searchQuery, focusMode, onFocusM
       filtered = filtered.filter((c) => extractCallCategoryFromFilename(c.filename) === callCategoryFilter);
     }
 
-    if (followUpReasonFilter !== 'ALL') {
-      filtered = filtered.filter((c) => getFollowUpReason(c).reason === followUpReasonFilter);
+    if (relatedToFilter !== 'ALL') {
+      filtered = filtered.filter((c) => getRelatedTo(c).value === relatedToFilter);
+    }
+
+    if (nextStepFilter !== 'ALL') {
+      filtered = filtered.filter((c) => {
+        const nextStep = getNextStep(c);
+        return nextStep === nextStepFilter;
+      });
     }
 
     if (searchQuery.trim()) {
@@ -143,6 +156,10 @@ export function CallList({ calls, onCallSelect, searchQuery, focusMode, onFocusM
           call.doctor_name,
           call.hospital_name,
           call.LeadNotes,
+          call.department,
+          call.services,
+          call.filename,
+          call.transcript,
           (call as { ticket_notes?: string }).ticket_notes,
         ];
         return fields.some((f) => f && String(f).toLowerCase().includes(q));
@@ -173,14 +190,14 @@ export function CallList({ calls, onCallSelect, searchQuery, focusMode, onFocusM
     sortBy,
     actionRequiredFilter,
     callClassificationFilter,
-    followUpReasonFilter,
     sentimentFilter,
     hospitalFilter,
     callCategoryFilter,
+    relatedToFilter,
+    nextStepFilter,
     searchQuery,
     quickFilter,
     phoneCounts,
-    focusMode,
     now,
   ]);
 
@@ -305,13 +322,21 @@ export function CallList({ calls, onCallSelect, searchQuery, focusMode, onFocusM
             </select>
           </div>
           <div className="filter-group">
-            <label>Next Action</label>
-            <select value={followUpReasonFilter} onChange={(e) => setFollowUpReasonFilter(e.target.value)}>
+            <label>Related to</label>
+            <select value={relatedToFilter} onChange={(e) => setRelatedToFilter(e.target.value)}>
               <option value="ALL">All</option>
-              {FOLLOW_UP_REASONS.filter((r) => r !== 'Unclear').map((r) => (
+              {RELATED_TO_VALUES.map((r) => (
                 <option key={r} value={r}>{r}</option>
               ))}
-              <option value="Unclear">Unclear</option>
+            </select>
+          </div>
+          <div className="filter-group">
+            <label>Next step</label>
+            <select value={nextStepFilter} onChange={(e) => setNextStepFilter(e.target.value)}>
+              <option value="ALL">All</option>
+              {uniqueValues.nextSteps.map((ns) => (
+                <option key={ns} value={ns}>{ns}</option>
+              ))}
             </select>
           </div>
           <div className="filter-group">
@@ -350,11 +375,8 @@ export function CallList({ calls, onCallSelect, searchQuery, focusMode, onFocusM
             const whyMatters = getWhyThisMatters(call, phoneCount);
             const consequence = getConsequenceHint(call, riskScore, isRepeat);
             const historySignals = getHistorySignals(call, phoneCount);
-            const { reason: followUpReason } = getFollowUpReason(call);
             const callerName = call.customer_name || 'Unknown caller';
             const isCritical = riskTier === 'high' || (actionReq && riskTier === 'medium');
-            const rt = (call.recordType || '').toUpperCase();
-            const isTicket = rt === 'TICKET' || rt === 'TICKET_CONFUSION' || rt === 'CONFUSION';
 
             return (
               <div
@@ -396,11 +418,6 @@ export function CallList({ calls, onCallSelect, searchQuery, focusMode, onFocusM
                     <span className={`record-type-badge ${getRecordTypeClass(call.recordType)}`}>
                       {getDisplayRecordType(call.recordType)}
                     </span>
-                    {(isTicket || actionReq) && (
-                      <span className={`reason-tag reason-${followUpReason.toLowerCase().replace(/\s+/g, '-')}`} title={`Next Action: ${followUpReason}`}>
-                        {followUpReason}
-                      </span>
-                    )}
                     {call.call_classification && (
                       <span className="classification-badge">{call.call_classification}</span>
                     )}
