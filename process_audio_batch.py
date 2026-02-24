@@ -1,42 +1,41 @@
+#!/usr/bin/env python3
+"""
+Batch Audio Processing Script
+Processes all audio files from an input folder and generates JSON outputs in an output folder.
+"""
+
 import os
 import json
+import sys
 from pathlib import Path
 from dotenv import load_dotenv
 from google import genai
 from datetime import datetime
 
-# Load environment variables
-load_dotenv()
+# Load environment variables from .env file in script directory
+script_dir = Path(__file__).resolve().parent
+env_path = script_dir / ".env"
+load_dotenv(dotenv_path=env_path)
 
-# Configuration: one output folder for all JSON files (relative to script location)
-_SCRIPT_DIR = Path(__file__).resolve().parent
+# Also check environment variable (in case exported in shell)
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-AUDIO_DIR = _SCRIPT_DIR / "audio"
-OUTPUT_DIR = _SCRIPT_DIR / "output"  # only place JSON files are saved
 
 if not GEMINI_API_KEY:
     print("ERROR: GEMINI_API_KEY not found in .env file or environment variables.")
     print("   Please add GEMINI_API_KEY to your .env file")
-    raise ValueError("GEMINI_API_KEY not found")
+    sys.exit(1)
 
 # Initialize Gemini API client
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-# Create output directory if it doesn't exist
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
 def extract_timestamp_from_filename(filename):
     """Extract timestamp from filename if available."""
-    # Try to extract timestamp from filename patterns
-    # Example: in_8867065830_Sparsh_Emergency_Muthumari_1012_inbound_20251203134613.WAV
     import re
-    # Look for YYYYMMDDHHMMSS pattern right before file extension (most reliable)
-    # Pattern: 14 digits followed by .WAV/.wav/.mp3 etc.
+    # Look for YYYYMMDDHHMMSS pattern right before file extension
     match = re.search(r'(\d{14})\.(WAV|wav|mp3|MP3)', filename)
     if match:
         ts_str = match.group(1)
         try:
-            # Parse: YYYYMMDDHHMMSS
             dt = datetime.strptime(ts_str, "%Y%m%d%H%M%S")
             return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
         except Exception as e:
@@ -46,7 +45,6 @@ def extract_timestamp_from_filename(filename):
     if match:
         ts_str = match.group(1)
         try:
-            # Parse: YYYYMMDDHHMMSS
             dt = datetime.strptime(ts_str, "%Y%m%d%H%M%S")
             return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
         except Exception as e:
@@ -55,7 +53,7 @@ def extract_timestamp_from_filename(filename):
     print(f"  WARNING: No valid timestamp found in filename '{filename}', using current time")
     return datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
 
-def process_audio_file(audio_path):
+def process_audio_file(audio_path, output_dir):
     """Process a single audio file with Gemini API and extract entities."""
     print(f"\nProcessing: {audio_path.name}")
     
@@ -207,9 +205,9 @@ CRITICAL rules:
             extracted_data.pop(key, None)
         
         # Always extract timestamp from filename (filename is the source of truth)
-        # Remove any timestamp Gemini might have provided
         filename_timestamp = extract_timestamp_from_filename(audio_path.name)
         extracted_data["timestamp"] = filename_timestamp
+        extracted_data["filename"] = audio_path.name
         print(f"  Extracted timestamp from filename: {filename_timestamp}")
         
         # Ensure source_type is set
@@ -237,7 +235,7 @@ CRITICAL rules:
             "department_to_handle", "priority", "ticket_notes", "LeadNotes", "call_solution", "transcript",
             "customer_name", "phone_number", "location", "department", "services", "follow_up_required",
             "hospital_name", "doctor_name", "customer_sentiment_label", "customer_sentiment_summary", 
-            "agent_sentiment_label", "agent_sentiment_summary", "outcome", "timestamp"
+            "agent_sentiment_label", "agent_sentiment_summary", "outcome", "timestamp", "filename"
         )
         ordered = {k: extracted_data[k] for k in key_order if k in extracted_data}
         for k, v in extracted_data.items():
@@ -265,61 +263,237 @@ CRITICAL rules:
             print(f"  WARNING: Could not delete uploaded file: {cleanup_error}")
             pass
 
-def main():
-    print("Entity Extraction Script")
-    print("=" * 50)
-    print(f"Audio directory: {AUDIO_DIR.resolve()}")
-    print(f"Output directory: {OUTPUT_DIR.resolve()}")
-    print("=" * 50)
-    
-    # Check if audio directory exists
-    if not AUDIO_DIR.exists():
-        print(f"ERROR: Audio directory '{AUDIO_DIR}' not found!")
-        print(f"   Please create the '{AUDIO_DIR}' folder and add your audio files there.")
-        return
-    
-    # Find all audio files
-    audio_files = list(AUDIO_DIR.glob("*.wav")) + \
-                  list(AUDIO_DIR.glob("*.WAV")) + \
-                  list(AUDIO_DIR.glob("*.mp3")) + \
-                  list(AUDIO_DIR.glob("*.MP3"))
+def process_directory(input_dir, output_dir, dir_name="", recursive=False):
+    """Process all audio files from a single input directory."""
+    # Find all audio files (optionally recursive)
+    if recursive:
+        audio_files = list(input_dir.rglob("*.wav")) + \
+                      list(input_dir.rglob("*.WAV")) + \
+                      list(input_dir.rglob("*.mp3")) + \
+                      list(input_dir.rglob("*.MP3"))
+    else:
+        audio_files = list(input_dir.glob("*.wav")) + \
+                      list(input_dir.glob("*.WAV")) + \
+                      list(input_dir.glob("*.mp3")) + \
+                      list(input_dir.glob("*.MP3"))
     
     if not audio_files:
-        print(f"WARNING: No audio files found in {AUDIO_DIR}/")
-        print("   Supported formats: .wav, .mp3")
-        return
+        print(f"  ⚠️  No audio files found in {dir_name or input_dir.name}/")
+        print(f"     Supported formats: .wav, .WAV, .mp3, .MP3")
+        print(f"     Folder path: {input_dir}")
+        
+        # Check if folder exists and list contents
+        if input_dir.exists():
+            contents = list(input_dir.iterdir())
+            if contents:
+                print(f"     Folder contains: {len(contents)} item(s)")
+                for item in contents[:5]:  # Show first 5 items
+                    item_type = "📁 folder" if item.is_dir() else f"📄 {item.suffix or 'file'}"
+                    print(f"       - {item.name} ({item_type})")
+                if len(contents) > 5:
+                    print(f"       ... and {len(contents) - 5} more")
+            else:
+                print(f"     Folder is empty")
+        else:
+            print(f"     ⚠️  Folder does not exist!")
+        
+        return 0, 0, 0
     
-    print(f"\nFound {len(audio_files)} audio file(s) to process\n")
+    print(f"\n  📁 Processing {len(audio_files)} file(s) from {dir_name or input_dir.name}/...")
     
     success_count = 0
     failed_count = 0
+    skipped_count = 0
     
     for audio_file in audio_files:
+        # Check if output already exists
+        output_filename = audio_file.stem + ".json"
+        output_path = output_dir / output_filename
+        
+        if output_path.exists():
+            if skipped_count == 0:
+                print(f"    Checking existing files...")
+            skipped_count += 1
+            if skipped_count <= 3 or skipped_count % 50 == 0:
+                print(f"    Skipping {audio_file.name} (already exists)")
+            continue
+        
         # Process audio file
-        extracted_data = process_audio_file(audio_file)
+        extracted_data = process_audio_file(audio_file, output_dir)
         
         if extracted_data:
             # Save to JSON file
-            output_filename = audio_file.stem + ".json"
-            output_path = OUTPUT_DIR / output_filename
-            
             try:
                 with open(output_path, "w", encoding="utf-8") as f:
                     json.dump(extracted_data, f, indent=2, ensure_ascii=False)
-                print(f"  Saved to: {output_path}")
+                print(f"    ✓ Processed: {audio_file.name}")
                 success_count += 1
             except Exception as e:
-                print(f"  ERROR: Error saving file: {e}")
+                print(f"    ✗ ERROR processing {audio_file.name}: {e}")
                 failed_count += 1
         else:
             failed_count += 1
     
-    print("\n" + "=" * 50)
-    print("Processing complete!")
-    print(f"   Successfully processed: {success_count}")
-    print(f"   Failed: {failed_count}")
-    print(f"   JSON files saved in: {OUTPUT_DIR.resolve()}/")
-    print("=" * 50)
+    return success_count, skipped_count, failed_count
+
+def main():
+    import argparse
+    
+    parser = argparse.ArgumentParser(
+        description="Process audio files from input folder(s) and generate JSON outputs",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Process both incoming and outgoing calls from OneDrive
+  python3 process_audio_batch.py --onedrive
+  
+  # Process specific folders
+  python3 process_audio_batch.py --input /path/to/in --input /path/to/out
+  
+  # Use default folders (in/ and out/ relative to script)
+  python3 process_audio_batch.py
+        """
+    )
+    
+    parser.add_argument(
+        '--input', '-i',
+        action='append',
+        type=str,
+        help='Input folder(s) containing audio files (can specify multiple times)'
+    )
+    parser.add_argument(
+        '--output', '-o',
+        type=str,
+        help='Output folder for JSON files (default: ./output)'
+    )
+    parser.add_argument(
+        '--onedrive',
+        action='store_true',
+        help='Process both in/ and out/ folders from OneDrive'
+    )
+    parser.add_argument(
+        '--project-audio',
+        action='store_true',
+        help='Process audio files from project audio/ folder'
+    )
+    parser.add_argument(
+        '--recursive', '-r',
+        action='store_true',
+        help='Search for audio files recursively in subdirectories'
+    )
+    
+    args = parser.parse_args()
+    
+    # Determine input and output directories
+    script_dir = Path(__file__).resolve().parent
+    
+    # Determine output directory (always use project's output folder)
+    if args.output:
+        output_dir = Path(args.output).resolve()
+    else:
+        output_dir = script_dir / "output"
+    
+    # Determine input directories
+    input_dirs = []
+    
+    if args.onedrive:
+        # Process both incoming and outgoing from OneDrive folder in Downloads
+        # Note: Both "in" and "out" folders contain audio files (incoming/outgoing calls)
+        onedrive_base = Path("/Users/anjali/Downloads/OneDrive_1_1-12-2026 2")
+        in_dir = onedrive_base / "in"
+        out_dir = onedrive_base / "out"
+        
+        if in_dir.exists():
+            input_dirs.append(("Incoming (in/)", in_dir))
+        if out_dir.exists():
+            input_dirs.append(("Outgoing (out/)", out_dir))
+        
+        if not input_dirs:
+            print(f"ERROR: OneDrive folders not found at: {onedrive_base}")
+            print("   Expected folders: in/ (incoming calls) and/or out/ (outgoing calls)")
+            print(f"   Current contents: {list(onedrive_base.iterdir())}")
+            sys.exit(1)
+    elif args.project_audio:
+        # Process from project's audio folder
+        project_audio = script_dir / "audio"
+        if project_audio.exists():
+            input_dirs.append(("Project Audio", project_audio))
+        else:
+            print(f"ERROR: Project audio folder not found: {project_audio}")
+            sys.exit(1)
+    elif args.input:
+        # Use specified input directories
+        for inp in args.input:
+            inp_path = Path(inp).resolve()
+            if inp_path.exists():
+                input_dirs.append((inp_path.name, inp_path))
+            else:
+                print(f"WARNING: Input directory not found: {inp}")
+    else:
+        # Default: use script directory's in/ folder
+        default_input = script_dir / "in"
+        if default_input.exists():
+            input_dirs.append(("in", default_input))
+        else:
+            print(f"ERROR: No input directories found!")
+            print(f"   Please specify --input, --onedrive, or --project-audio")
+            sys.exit(1)
+    
+    print("=" * 70)
+    print("Batch Audio Processing Script")
+    print("=" * 70)
+    print(f"Output directory: {output_dir}")
+    print(f"Input directories:")
+    for name, path in input_dirs:
+        print(f"  - {name}: {path}")
+    print("=" * 70)
+    
+    # Create output directory if it doesn't exist
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Process all input directories
+    total_success = 0
+    total_skipped = 0
+    total_failed = 0
+    total_files_found = 0
+    
+    for dir_name, input_dir in input_dirs:
+        # Count files first
+        audio_files = list(input_dir.glob("*.wav")) + \
+                      list(input_dir.glob("*.WAV")) + \
+                      list(input_dir.glob("*.mp3")) + \
+                      list(input_dir.glob("*.MP3"))
+        total_files_found += len(audio_files)
+        
+        success, skipped, failed = process_directory(input_dir, output_dir, dir_name, args.recursive)
+        total_success += success
+        total_skipped += skipped
+        total_failed += failed
+    
+    if total_files_found == 0:
+        print("\n" + "=" * 70)
+        print("⚠️  No audio files found in any input directory!")
+        print("=" * 70)
+        print("\nPlease add audio files (.wav or .mp3) to:")
+        for dir_name, input_dir in input_dirs:
+            print(f"  - {dir_name}: {input_dir}")
+        print("\nThen run the script again.")
+        sys.exit(0)
+    
+    print("\n" + "=" * 70)
+    print("Processing Summary")
+    print("=" * 70)
+    print(f"   Successfully processed: {total_success}")
+    print(f"   Skipped (already exists): {total_skipped}")
+    print(f"   Failed: {total_failed}")
+    print(f"   Total files processed: {total_success + total_skipped + total_failed}")
+    print(f"\n   JSON files saved in: {output_dir}/")
+    print("=" * 70)
+    
+    if total_success > 0:
+        print(f"\n💡 To view these files in the dashboard:")
+        print(f"   cd dashboard && npm run load-data && npm run dev")
+        print(f"   (Dashboard automatically reads from: {output_dir})")
 
 if __name__ == "__main__":
     main()

@@ -45,6 +45,13 @@ body {
   flex-direction: column;
 }
 
+/* When inside unified layout, fill available space */
+.calls-view-wrapper {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
 /* Header */
 .app-header {
   background: var(--bg-surface);
@@ -63,10 +70,11 @@ body {
 }
 
 .header-title h1 {
-  font-size: 1.5rem;
-  font-weight: 600;
-  color: var(--text-primary);
-  letter-spacing: -0.02em;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
 }
 
 .header-title .subtitle {

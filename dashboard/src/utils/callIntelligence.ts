@@ -28,7 +28,8 @@ export function isActionRequired(call: CallData): boolean {
 }
 
 export function isHighAnxiety(call: CallData): boolean {
-  const s = (call.sentiment_label || '').toUpperCase();
+  // Use customer sentiment (with backward compatibility)
+  const s = ((call.customer_sentiment_label || call.sentiment_label) || '').toUpperCase();
   return s.includes('ANXIOUS') || s.includes('NEGATIVE') || s.includes('FRUSTRATED') || s.includes('ANGRY');
 }
 
@@ -119,8 +120,8 @@ export function getRiskScore(
 ): { score: number; tier: 'high' | 'medium' | 'low' } {
   let score = 0;
 
-  // Sentiment (0-25)
-  const s = (call.sentiment_label || '').toUpperCase();
+  // Sentiment (0-25) - use customer sentiment (with backward compatibility)
+  const s = ((call.customer_sentiment_label || call.sentiment_label) || '').toUpperCase();
   if (s.includes('FRUSTRATED') || s.includes('ANGRY')) score += 25;
   else if (s.includes('ANXIOUS') || s.includes('NEGATIVE')) score += 18;
   else if (s.includes('NEUTRAL')) score += 5;
@@ -189,7 +190,8 @@ export function getWhyThisMatters(
   }
 
   if (isHighAnxiety(call)) {
-    const s = (call.sentiment_label || '').toLowerCase();
+    // Use customer sentiment (with backward compatibility)
+    const s = ((call.customer_sentiment_label || call.sentiment_label) || '').toLowerCase();
     if (s.includes('frustrated')) parts.push('Caller frustrated');
     else if (s.includes('anxious')) parts.push('Caller anxious');
   }
@@ -415,14 +417,149 @@ function cleanActionText(text: string, actor: 'Agent' | 'Caller'): string {
   return cleaned;
 }
 
+/** True when the call content indicates nothing left to do (e.g. already cancelled, already booked). */
+export function isNoActionNeeded(call: CallData): boolean {
+  // Check outcome field first - direct signal
+  const outcome = (call.outcome || '').toUpperCase();
+  if (outcome === 'CANCELLED') {
+    return true; // Cancelled = no action needed
+  }
+  
+  // Check all text fields including transcript and LeadNotes
+  const allText = [
+    call.transcript,
+    call.customer_sentiment_summary,
+    call.agent_sentiment_summary,
+    call.sentiment_summary, // Backward compatibility
+    call.call_solution,
+    call.ticket_solution,
+    call.action_description,
+    call.LeadNotes,
+    call.notes,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  
+  const noActionPhrases = [
+    // Cancellation phrases - these indicate the matter is already resolved
+    'already cancelled',
+    'had been cancelled',
+    'was cancelled',
+    'cancellation was confirmed',
+    'confirmed that the appointment had been cancelled',
+    'appointment had been cancelled',
+    'appointment was cancelled',
+    'appointment was already cancelled',
+    'the appointment had been cancelled',
+    'the appointment was cancelled',
+    
+    // Booking completion phrases - "already" indicates it was done before this call
+    'already booked',
+    'booking is already made',
+    'already made',
+    'appointment was already booked',
+    'appointment had been booked',
+    'was already booked',
+    'the appointment was already booked',
+    'the appointment had been booked',
+    'already confirmed',
+    'appointment was already confirmed',
+    'appointment had been confirmed',
+    'already scheduled',
+    'appointment was already scheduled',
+    'appointment had been scheduled',
+    
+    // General completion phrases
+    'call concluded',
+    'call ended',
+    'no further action',
+    'no action required',
+    'matter resolved',
+    'issue resolved',
+  ];
+  
+  // Check for phrases indicating completion
+  const hasCompletionPhrase = noActionPhrases.some((phrase) => allText.includes(phrase));
+  
+  // Also check: if outcome is BOOKED and there's no action required AND text indicates completion
+  if (outcome === 'BOOKED' && !isActionRequired(call)) {
+    // Check if the booking was just completed in this call (needs follow-up) vs already existed
+    const justBookedPhrases = ['successfully booked', 'was booked', 'appointment was booked', 'booking confirmed'];
+    const wasJustBooked = justBookedPhrases.some((phrase) => allText.includes(phrase));
+    // If it was just booked in this call but no action required, it's done
+    if (wasJustBooked) return true;
+  }
+  
+  return hasCompletionPhrase;
+}
+
+/** Check if appointment was successfully booked in this call (not already booked before). */
+function wasAppointmentJustBooked(call: CallData): boolean {
+  // Check all text fields for booking indicators
+  const allText = [
+    call.transcript,
+    call.call_solution,
+    call.customer_sentiment_summary,
+    call.agent_sentiment_summary,
+    call.sentiment_summary, // Backward compatibility
+    call.LeadNotes,
+    call.action_description,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  
+  const justBookedPhrases = [
+    'successfully booked',
+    'was booked',
+    'appointment was booked',
+    'appointment was successfully booked',
+    'booked for',
+    'confirmed and booked',
+    'booking confirmed',
+    'appointment confirmed',
+    'the caller successfully booked',
+    'the agent confirmed and booked',
+    'booked the appointment',
+  ];
+  
+  const alreadyBookedPhrases = [
+    'already booked',
+    'was already booked',
+    'appointment was already booked',
+    'had been booked',
+    'appointment had been booked',
+  ];
+  
+  // If it contains "already booked" phrases, it wasn't just booked
+  if (alreadyBookedPhrases.some(phrase => allText.includes(phrase))) {
+    return false;
+  }
+  
+  // Check if it contains "just booked" phrases
+  const hasBookingPhrase = justBookedPhrases.some(phrase => allText.includes(phrase));
+  
+  // Also check outcome field as additional signal
+  const outcome = (call.outcome || '').toUpperCase();
+  
+  return hasBookingPhrase || outcome === 'BOOKED';
+}
+
 /** Get next step: explicit action text with actor (Agent/Caller). Returns null if no callback. */
 export function getNextStep(call: CallData): string | null {
+  if (isNoActionNeeded(call)) return null;
   if (call.nextStep && call.nextStep.trim()) {
     return call.nextStep.trim();
   }
   if (!isActionRequired(call)) {
     const rt = (call.recordType || '').toUpperCase();
     if (rt !== 'TICKET' && !call.follow_up_required) return null;
+  }
+  
+  // Check if appointment was just booked - if so, next step is reminder, not confirmation
+  if (wasAppointmentJustBooked(call)) {
+    return 'Agent needs to send reminder day before appointment';
   }
   
   // Prioritize action_description as it's most explicit
@@ -447,6 +584,8 @@ export function getNextStep(call: CallData): string | null {
       // Callbacks are always agent actions
       return 'Agent needs to arrange callback from doctor';
     } else if (lowerFirst.includes('appointment') || lowerFirst.includes('book')) {
+      // Only say "confirm appointment details" if it wasn't just booked
+      // (wasAppointmentJustBooked check above handles the booked case)
       actionText = 'confirm appointment details';
     } else if (lowerFirst.includes('prescription') || lowerFirst.includes('medicine')) {
       actionText = 'resend prescription';

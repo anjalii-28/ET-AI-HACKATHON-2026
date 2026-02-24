@@ -1,5 +1,5 @@
 import { CallData } from '../types';
-import { getRelatedTo, getNextStep } from '../utils/callIntelligence';
+import { getRelatedTo, getNextStep, isNoActionNeeded } from '../utils/callIntelligence';
 
 interface CallDetailProps {
   call: CallData | null;
@@ -31,8 +31,10 @@ export function CallDetail({ call, onClose }: CallDetailProps) {
     return false;
   };
 
-  const actionRequired = getActionRequired(call.action_required);
-  
+  const actionRequiredRaw = getActionRequired(call.action_required);
+  const noActionNeeded = isNoActionNeeded(call);
+  const actionRequired = noActionNeeded ? false : actionRequiredRaw;
+
   const getSentimentColor = (sentiment?: string): string => {
     if (!sentiment) return '#64748b';
     const s = sentiment.toLowerCase();
@@ -192,27 +194,56 @@ export function CallDetail({ call, onClose }: CallDetailProps) {
             </section>
           )}
 
-          {/* Sentiment */}
-          {(call.sentiment_label || call.sentiment_summary) && (
+          {/* Sentiment Analysis */}
+          {(call.customer_sentiment_label || call.customer_sentiment_summary || 
+            call.agent_sentiment_label || call.agent_sentiment_summary ||
+            call.sentiment_label || call.sentiment_summary) && (
             <section className="detail-section">
               <h3>Sentiment Analysis</h3>
               <div className="detail-grid">
-                {call.sentiment_label && (
-                  <div className="detail-item">
-                    <span className="detail-label">Sentiment:</span>
-                    <span className="detail-value">
-                      <span
-                        className="sentiment-dot"
-                        style={{ backgroundColor: getSentimentColor(call.sentiment_label) }}
-                      />
-                      {call.sentiment_label}
-                    </span>
+                {/* Customer Sentiment */}
+                {(call.customer_sentiment_label || call.customer_sentiment_summary || 
+                  call.sentiment_label || call.sentiment_summary) && (
+                  <div className="detail-item full-width">
+                    <span className="detail-label">Customer Sentiment:</span>
+                    <div style={{ marginTop: '4px' }}>
+                      {(call.customer_sentiment_label || call.sentiment_label) && (
+                        <span className="detail-value" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span
+                            className="sentiment-dot"
+                            style={{ backgroundColor: getSentimentColor(call.customer_sentiment_label || call.sentiment_label) }}
+                          />
+                          {call.customer_sentiment_label || call.sentiment_label}
+                        </span>
+                      )}
+                      {(call.customer_sentiment_summary || call.sentiment_summary) && (
+                        <div style={{ marginTop: '4px', fontSize: '0.9em', color: '#64748b' }}>
+                          {call.customer_sentiment_summary || call.sentiment_summary}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
-                {call.sentiment_summary && (
+                {/* Agent Sentiment */}
+                {(call.agent_sentiment_label || call.agent_sentiment_summary) && (
                   <div className="detail-item full-width">
-                    <span className="detail-label">Summary:</span>
-                    <span className="detail-value">{call.sentiment_summary}</span>
+                    <span className="detail-label">Agent Sentiment/Tone:</span>
+                    <div style={{ marginTop: '4px' }}>
+                      {call.agent_sentiment_label && (
+                        <span className="detail-value" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span
+                            className="sentiment-dot"
+                            style={{ backgroundColor: getSentimentColor(call.agent_sentiment_label) }}
+                          />
+                          {call.agent_sentiment_label}
+                        </span>
+                      )}
+                      {call.agent_sentiment_summary && (
+                        <div style={{ marginTop: '4px', fontSize: '0.9em', color: '#64748b' }}>
+                          {call.agent_sentiment_summary}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -232,8 +263,8 @@ export function CallDetail({ call, onClose }: CallDetailProps) {
             </div>
           </section>
 
-          {/* Ticket / Follow-up section */}
-          {(call.recordType?.toUpperCase() === 'TICKET' || actionRequired || call.follow_up_required) && (
+          {/* Ticket / Follow-up section - show when ticket or raw action/follow-up so we can display "No action" */}
+          {(call.recordType?.toUpperCase() === 'TICKET' || actionRequiredRaw || actionRequired || call.follow_up_required) && (
             <section className="detail-section">
               <h3>Ticket / Follow-up</h3>
               <div className="detail-grid">
@@ -247,11 +278,13 @@ export function CallDetail({ call, onClose }: CallDetailProps) {
                   );
                 })()}
                 {(() => {
-                  const nextStep = getNextStep(call);
-                  return nextStep ? (
+                  const noAction = isNoActionNeeded(call);
+                  const nextStep = noAction ? null : getNextStep(call);
+                  const displayStep = noAction ? 'No action' : nextStep;
+                  return displayStep ? (
                     <div className="detail-item">
                       <span className="detail-label">Next step:</span>
-                      <span className="detail-value detail-value-prominent">{nextStep}</span>
+                      <span className={`detail-value ${noAction ? 'detail-value-muted' : 'detail-value-prominent'}`}>{displayStep}</span>
                     </div>
                   ) : null;
                 })()}

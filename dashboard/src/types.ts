@@ -32,8 +32,12 @@ export interface CallData {
   action_required?: boolean | string;
   follow_up_required?: boolean;
   outcome?: string;
-  sentiment_label?: string;
-  sentiment_summary?: string;
+  sentiment_label?: string; // Deprecated: use customer_sentiment_label instead
+  sentiment_summary?: string; // Deprecated: use customer_sentiment_summary instead
+  customer_sentiment_label?: string;
+  customer_sentiment_summary?: string;
+  agent_sentiment_label?: string;
+  agent_sentiment_summary?: string;
   follow_ups?: string[] | string;
   customer_name?: string;
   phone_number?: string;

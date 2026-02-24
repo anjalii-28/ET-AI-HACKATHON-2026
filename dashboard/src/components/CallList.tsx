@@ -11,7 +11,6 @@ import {
   getConsequenceHint,
   getHistorySignals,
   getRelatedTo,
-  getNextStep,
 } from '../utils/callIntelligence';
 import { RELATED_TO_VALUES } from '../types';
 
@@ -46,7 +45,6 @@ export function CallList({ calls, onCallSelect, searchQuery, focusMode, onFocusM
   const [hospitalFilter, setHospitalFilter] = useState<string>('ALL');
   const [callCategoryFilter, setCallCategoryFilter] = useState<string>('ALL');
   const [relatedToFilter, setRelatedToFilter] = useState<string>('ALL');
-  const [nextStepFilter, setNextStepFilter] = useState<string>('ALL');
   const [quickFilter, setQuickFilter] = useState<'all' | 'action' | 'anxiety' | 'repeat'>('all');
   const [now, setNow] = useState(() => Date.now());
 
@@ -64,19 +62,19 @@ export function CallList({ calls, onCallSelect, searchQuery, focusMode, onFocusM
     return m;
   }, [calls]);
 
-  const uniqueValues = useMemo(() => {
+    const uniqueValues = useMemo(() => {
     const classifications = new Set<string>();
     const sentiments = new Set<string>();
     const hospitals = new Set<string>();
     const categories = new Set<string>();
-    const nextSteps = new Set<string>();
     calls.forEach((call) => {
       if (call.call_classification) classifications.add(call.call_classification);
-      if (call.sentiment_label) sentiments.add(call.sentiment_label);
+      // Include both customer and agent sentiments, with backward compatibility
+      if (call.customer_sentiment_label) sentiments.add(call.customer_sentiment_label);
+      if (call.agent_sentiment_label) sentiments.add(`Agent: ${call.agent_sentiment_label}`);
+      if (call.sentiment_label) sentiments.add(call.sentiment_label); // Backward compatibility
       if (call.hospital_name) hospitals.add(call.hospital_name);
       categories.add(extractCallCategoryFromFilename(call.filename));
-      const nextStep = getNextStep(call);
-      if (nextStep) nextSteps.add(nextStep);
     });
     const categoryOrder = ['APPOINTMENT', 'CUSTOMER_CARE', 'EMERGENCY', 'POST_DISCHARGE', 'OTHER'];
     const sortedCategories = Array.from(categories).sort((a, b) => {
@@ -92,7 +90,6 @@ export function CallList({ calls, onCallSelect, searchQuery, focusMode, onFocusM
       sentiments: Array.from(sentiments).sort(),
       hospitals: Array.from(hospitals).sort(),
       categories: sortedCategories,
-      nextSteps: Array.from(nextSteps).sort(),
     };
   }, [calls]);
 
@@ -125,7 +122,15 @@ export function CallList({ calls, onCallSelect, searchQuery, focusMode, onFocusM
       filtered = filtered.filter((c) => c.call_classification === callClassificationFilter);
     }
     if (sentimentFilter !== 'ALL') {
-      filtered = filtered.filter((c) => c.sentiment_label === sentimentFilter);
+      filtered = filtered.filter((c) => {
+        // Check customer sentiment (with backward compatibility)
+        if (sentimentFilter.startsWith('Agent: ')) {
+          const agentSentiment = sentimentFilter.replace('Agent: ', '');
+          return c.agent_sentiment_label === agentSentiment;
+        }
+        return c.customer_sentiment_label === sentimentFilter || 
+               c.sentiment_label === sentimentFilter; // Backward compatibility
+      });
     }
     if (hospitalFilter !== 'ALL') {
       filtered = filtered.filter((c) => c.hospital_name === hospitalFilter);
@@ -138,20 +143,15 @@ export function CallList({ calls, onCallSelect, searchQuery, focusMode, onFocusM
       filtered = filtered.filter((c) => getRelatedTo(c).value === relatedToFilter);
     }
 
-    if (nextStepFilter !== 'ALL') {
-      filtered = filtered.filter((c) => {
-        const nextStep = getNextStep(c);
-        return nextStep === nextStepFilter;
-      });
-    }
-
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim();
       filtered = filtered.filter((call) => {
         const fields = [
           call.notes,
           call.ticket_solution,
-          call.sentiment_summary,
+          call.customer_sentiment_summary,
+          call.agent_sentiment_summary,
+          call.sentiment_summary, // Backward compatibility
           call.customer_name,
           call.doctor_name,
           call.hospital_name,
@@ -194,7 +194,6 @@ export function CallList({ calls, onCallSelect, searchQuery, focusMode, onFocusM
     hospitalFilter,
     callCategoryFilter,
     relatedToFilter,
-    nextStepFilter,
     searchQuery,
     quickFilter,
     phoneCounts,
@@ -331,15 +330,6 @@ export function CallList({ calls, onCallSelect, searchQuery, focusMode, onFocusM
             </select>
           </div>
           <div className="filter-group">
-            <label>Next step</label>
-            <select value={nextStepFilter} onChange={(e) => setNextStepFilter(e.target.value)}>
-              <option value="ALL">All</option>
-              {uniqueValues.nextSteps.map((ns) => (
-                <option key={ns} value={ns}>{ns}</option>
-              ))}
-            </select>
-          </div>
-          <div className="filter-group">
             <label>Sort by</label>
             <select value={sortBy} onChange={(e) => setSortBy(e.target.value as SortType)}>
               <option value="impact">Risk first</option>
@@ -424,11 +414,27 @@ export function CallList({ calls, onCallSelect, searchQuery, focusMode, onFocusM
                     {actionReq && <span className="action-badge">Action</span>}
                   </div>
                   <div className="sentiment-pill">
-                    <span
-                      className="sentiment-dot"
-                      style={{ backgroundColor: getSentimentColor(call.sentiment_label) }}
-                    />
-                    {call.sentiment_label || 'Unknown'}
+                    {(call.customer_sentiment_label || call.sentiment_label) && (
+                      <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <span
+                          className="sentiment-dot"
+                          style={{ backgroundColor: getSentimentColor(call.customer_sentiment_label || call.sentiment_label) }}
+                        />
+                        <span>C: {call.customer_sentiment_label || call.sentiment_label || 'Unknown'}</span>
+                      </span>
+                    )}
+                    {call.agent_sentiment_label && (
+                      <span style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: '8px' }}>
+                        <span
+                          className="sentiment-dot"
+                          style={{ backgroundColor: getSentimentColor(call.agent_sentiment_label) }}
+                        />
+                        <span>A: {call.agent_sentiment_label}</span>
+                      </span>
+                    )}
+                    {!call.customer_sentiment_label && !call.sentiment_label && !call.agent_sentiment_label && (
+                      <span>Unknown</span>
+                    )}
                   </div>
                 </div>
               </div>

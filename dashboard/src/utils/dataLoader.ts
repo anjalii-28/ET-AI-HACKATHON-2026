@@ -2,52 +2,67 @@ import { CallData } from '../types';
 
 /**
  * Loads call data from JSON files in the public/data directory.
- * 
- * Reads ALL JSON files from the output folder (via manifest.json).
- * Each JSON file represents ONE processed call.
- * 
+ * Limited to MAX_CALL_FILES to avoid browser resource errors (ERR_INSUFFICIENT_RESOURCES).
  * TICKET_CONFUSION is normalized to TICKET for display purposes.
  * Calls are sorted by timestamp (latest first).
  */
+const MAX_CALL_FILES = 120;
+const BATCH_SIZE = 20;
+const DATA_BASE = `${import.meta.env.BASE_URL}data`.replace(/\/+/g, '/');
+const DATA_BASE_ROOT = '/data';
+
+async function fetchData(path: string): Promise<Response> {
+  const url = `${DATA_BASE}/${path}`;
+  const res = await fetch(url);
+  if (res.ok) return res;
+  if (DATA_BASE !== DATA_BASE_ROOT) {
+    const fallback = await fetch(`${DATA_BASE_ROOT}/${path}`);
+    if (fallback.ok) return fallback;
+  }
+  return res;
+}
+
 export async function loadCallData(): Promise<CallData[]> {
   console.log('Loading call data...');
 
   try {
-    // Load manifest file that lists all JSON files from output folder
-    const manifestResponse = await fetch('/data/manifest.json');
+    // Load manifest (under app base /app/data/ for nginx; fallback to /data/ for Vite dev)
+    const manifestResponse = await fetchData('manifest.json');
     if (manifestResponse.ok) {
       const manifest = await manifestResponse.json();
       console.log(`Manifest loaded: ${manifest.totalFiles || 0} files listed`);
       
       if (Array.isArray(manifest.files)) {
-        console.log(`Loading ${manifest.files.length} file(s) from manifest...`);
-        
-        // Load each file listed in manifest
-        const filePromises = manifest.files.map(async (filename: string) => {
-          try {
-            const response = await fetch(`/data/${filename}`);
-            if (response.ok) {
-              const callData = await response.json();
-              // Normalize TICKET_CONFUSION to TICKET (UI-only normalization, not filtering)
-              const normalizedRecordType = normalizeRecordType(callData.recordType);
-              return {
-                ...callData,
-                recordType: normalizedRecordType,
-                filename: filename,
-              };
-            } else {
-              console.warn(`Failed to load ${filename}: HTTP ${response.status}`);
-            }
-          } catch (error) {
-            console.warn(`Failed to load ${filename}:`, error);
-          }
-          return null;
-        });
+        const filesToLoad = manifest.files.slice(0, MAX_CALL_FILES);
+        console.log(`Loading ${filesToLoad.length} file(s) (max ${MAX_CALL_FILES}) of ${manifest.files.length} in manifest...`);
 
-        const loadedCalls = await Promise.all(filePromises);
+        const loadedCalls: (CallData | null)[] = [];
+        for (let i = 0; i < filesToLoad.length; i += BATCH_SIZE) {
+          const batch = filesToLoad.slice(i, i + BATCH_SIZE);
+          const batchResults = await Promise.all(
+            batch.map(async (filename: string) => {
+              try {
+                const response = await fetchData(filename);
+                if (response.ok) {
+                  const callData = await response.json();
+                  const normalizedRecordType = normalizeRecordType(callData.recordType);
+                  return {
+                    ...callData,
+                    recordType: normalizedRecordType,
+                    filename: filename,
+                  } as CallData;
+                }
+              } catch (error) {
+                console.warn(`Failed to load ${filename}:`, error);
+              }
+              return null;
+            })
+          );
+          loadedCalls.push(...batchResults);
+        }
+
         const validCalls = loadedCalls.filter((call): call is CallData => call !== null);
-        
-        console.log(`Successfully loaded ${validCalls.length} of ${manifest.files.length} file(s)`);
+        console.log(`Successfully loaded ${validCalls.length} of ${filesToLoad.length} file(s)`);
         
         // Sort by timestamp (latest first)
         validCalls.sort((a, b) => {
@@ -68,7 +83,7 @@ export async function loadCallData(): Promise<CallData[]> {
   // Fallback: Try loading single consolidated file (only if manifest failed)
   console.warn('Manifest not found, trying fallback...');
   try {
-    const singleFileResponse = await fetch('/data/calls.json');
+    const singleFileResponse = await fetchData('calls.json');
     if (singleFileResponse.ok) {
       const data = await singleFileResponse.json();
       const callArray = Array.isArray(data) ? data : [data];
@@ -81,7 +96,7 @@ export async function loadCallData(): Promise<CallData[]> {
       }));
     }
   } catch (error) {
-    console.warn('Could not load /data/calls.json');
+    console.warn(`Could not load ${DATA_BASE}/calls.json`);
   }
 
   // Return empty array if no data found
@@ -139,7 +154,8 @@ function isActionRequired(call: CallData): boolean {
 }
 
 function isHighAnxiety(call: CallData): boolean {
-  const s = (call.sentiment_label || '').toUpperCase();
+  // Use customer sentiment (with backward compatibility)
+  const s = ((call.customer_sentiment_label || call.sentiment_label) || '').toUpperCase();
   return s.includes('ANXIOUS') || s.includes('NEGATIVE') || s.includes('FRUSTRATED') || s.includes('ANGRY');
 }
 
