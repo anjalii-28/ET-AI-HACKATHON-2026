@@ -44,9 +44,27 @@ interface ReviewsData {
   total: number;
 }
 
-const DEFAULT_PLACE_ID = 'demo_sparsh_hospital'; // Demo reviews
-const SPARSH_HOSPITAL_PLACE_ID = 'ChIJ448M01Y-rjsRTczIOZHyjso'; // SPARSH Hospital, RR Nagar (from Place ID Finder)
-const DEMO_CACHE_KEY = 'feedback_demo_32_static';
+const DEFAULT_PLACE_ID = 'demo_hospital'; // Built-in demo reviews (no Google Place)
+/** Example Google Place ID for testing (generic hospital — not tied to a brand in the UI). */
+const EXAMPLE_HOSPITAL_PLACE_ID = 'ChIJ448M01Y-rjsRTczIOZHyjso';
+const DEMO_CACHE_KEY = 'feedback_demo_hospital_v3';
+
+function formatFeedbackError(raw: unknown): string {
+  const s = typeof raw === 'string' ? raw : String(raw ?? '');
+  const lower = s.toLowerCase();
+  if (
+    lower.includes('api key') ||
+    lower.includes('expired') ||
+    lower.includes('api_key') ||
+    lower.includes('generativelanguage') ||
+    lower.includes('genai') ||
+    lower.includes('not configured')
+  ) {
+    return 'AI analysis needs a valid GEMINI_API_KEY in reviews-service/.env (renew the key if it expired).';
+  }
+  const oneLine = s.split('\n')[0]?.trim() || 'Something went wrong';
+  return oneLine.length > 220 ? `${oneLine.slice(0, 217)}…` : oneLine;
+}
 
 export function FeedbackView() {
   const [placeId, setPlaceId] = useState(DEFAULT_PLACE_ID);
@@ -76,32 +94,40 @@ export function FeedbackView() {
       setInsights(null);
       if (data.total === 0) {
         setError(
-          'Google returned 0 reviews for this place. Check the Place ID (use the correct one from Place ID Finder) or try "Use Sparsh Hospital ID" for built-in reviews.',
+          'Google returned 0 reviews for this place. Check the Place ID (use the correct one from Place ID Finder) or use the built-in demo hospital reviews from the default field.',
         );
       } else {
         await runAnalysis(id);
       }
     } catch (err: any) {
-      const msg =
-        err.response?.data?.message ||
-        err.message ||
-        'Failed to fetch reviews from Google';
+      const msg = formatFeedbackError(
+        err.response?.data?.message || err.message || 'Failed to fetch reviews from Google',
+      );
       setError(msg);
     } finally {
       setFetching(false);
     }
   };
 
-  const runAnalysis = async (placeIdToUse: string) => {
+  const runAnalysis = async (
+    placeIdToUse: string,
+    options?: { silent?: boolean },
+  ) => {
     setAnalyzing(true);
-    setError(null);
+    if (!options?.silent) {
+      setError(null);
+    }
     try {
       const response = await axios.post('/reviews/analyze', null, {
         params: { placeId: placeIdToUse },
       });
       setInsights(response.data);
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Analysis failed');
+      if (!options?.silent) {
+        setError(
+          formatFeedbackError(err.response?.data?.message || err.message || 'Analysis failed'),
+        );
+      }
     } finally {
       setAnalyzing(false);
     }
@@ -114,9 +140,15 @@ export function FeedbackView() {
         const cached = localStorage.getItem(DEMO_CACHE_KEY);
         if (cached) {
           const { reviewsData: cachedData, insights: cachedInsights } = JSON.parse(cached);
-          setReviewsData(cachedData);
-          setInsights(cachedInsights ?? null);
-          return;
+          const hasAnalysis =
+            cachedInsights &&
+            typeof cachedInsights.executive_summary === 'string' &&
+            cachedInsights.executive_summary.trim().length > 0;
+          if (cachedData?.total > 0 && hasAnalysis) {
+            setReviewsData(cachedData);
+            setInsights(cachedInsights);
+            return;
+          }
         }
       } catch {
         // ignore parse error, fetch below
@@ -134,7 +166,7 @@ export function FeedbackView() {
       const insightsResponse = await axios.get('/reviews/insights', {
         params: { placeId },
       });
-      const insightsData = insightsResponse.data ?? null;
+      let insightsData = insightsResponse.data ?? null;
       setInsights(insightsData);
 
       if (placeId === DEFAULT_PLACE_ID) {
@@ -147,19 +179,46 @@ export function FeedbackView() {
             const ratingDistribution = demo.ratingDistribution || { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
             const demoData = { reviews, ratingDistribution, total };
             setReviewsData(demoData);
-            await runAnalysis(DEFAULT_PLACE_ID);
-            const updatedInsights = await axios.get('/reviews/insights', { params: { placeId: DEFAULT_PLACE_ID } }).then((r) => r.data);
-            setInsights(updatedInsights ?? null);
-            localStorage.setItem(DEMO_CACHE_KEY, JSON.stringify({ reviewsData: demoData, insights: updatedInsights ?? null }));
+            try {
+              await runAnalysis(DEFAULT_PLACE_ID, { silent: true });
+              const updatedInsights = await axios
+                .get('/reviews/insights', { params: { placeId: DEFAULT_PLACE_ID } })
+                .then((r) => r.data);
+              setInsights(updatedInsights ?? null);
+              insightsData = updatedInsights ?? null;
+            } catch {
+              // GenAI missing or analysis failed — UI shows "No analysis" with hint
+            }
+            localStorage.setItem(
+              DEMO_CACHE_KEY,
+              JSON.stringify({ reviewsData: demoData, insights: insightsData }),
+            );
           } catch (_) {
             // ignore
           }
         } else {
-          localStorage.setItem(DEMO_CACHE_KEY, JSON.stringify({ reviewsData: data, insights: insightsData }));
+          if (!insightsData?.executive_summary?.trim()) {
+            try {
+              await runAnalysis(DEFAULT_PLACE_ID, { silent: true });
+              const again = await axios
+                .get('/reviews/insights', { params: { placeId: DEFAULT_PLACE_ID } })
+                .then((r) => r.data);
+              insightsData = again ?? null;
+              setInsights(insightsData);
+            } catch {
+              // leave null
+            }
+          }
+          localStorage.setItem(
+            DEMO_CACHE_KEY,
+            JSON.stringify({ reviewsData: data, insights: insightsData }),
+          );
         }
       }
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to load data');
+      setError(
+        formatFeedbackError(err.response?.data?.message || err.message || 'Failed to load data'),
+      );
     } finally {
       setLoading(false);
     }
@@ -220,10 +279,10 @@ export function FeedbackView() {
                 <button
                   type="button"
                   className="feedback-btn feedback-btn-small feedback-btn-link"
-                  onClick={() => setPlaceId(SPARSH_HOSPITAL_PLACE_ID)}
-                  title="Use SPARSH Hospital RR Nagar Place ID"
+                  onClick={() => setPlaceId(EXAMPLE_HOSPITAL_PLACE_ID)}
+                  title="Insert example Google Place ID for a hospital"
                 >
-                  Use Sparsh Hospital ID
+                  Use example hospital ID
                 </button>
               </div>
               <p className="feedback-place-hint">
@@ -235,7 +294,7 @@ export function FeedbackView() {
                 >
                   Google Place ID Finder
                 </a>
-                , search &quot;Sparsh Hospital&quot; (or your hospital), click the right listing and copy the Place ID. Each location has a different ID.
+                , search for your hospital by name, open the correct listing, and copy the Place ID. Each location has a different ID.
               </p>
             </div>
             <div className="feedback-actions">
@@ -416,12 +475,12 @@ export function FeedbackView() {
         <div className="feedback-empty">
           <p>No reviews loaded. 30 demo reviews load automatically for the demo place, or enter a Google Place ID and click <strong>Get reviews from Google</strong> (up to 5).</p>
           <p className="feedback-empty-hint">
-            Sparsh Hospital (RR Nagar) Place ID: <code className="feedback-place-id">{SPARSH_HOSPITAL_PLACE_ID}</code>
+            Example hospital Place ID: <code className="feedback-place-id">{EXAMPLE_HOSPITAL_PLACE_ID}</code>
             <button
               type="button"
               className="feedback-copy-id"
               onClick={() => {
-                setPlaceId(SPARSH_HOSPITAL_PLACE_ID);
+                setPlaceId(EXAMPLE_HOSPITAL_PLACE_ID);
               }}
             >
               Use this ID
