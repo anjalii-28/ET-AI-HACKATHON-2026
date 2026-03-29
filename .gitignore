@@ -33,3 +33,9 @@ node_modules/
 chatwoot/
 .env
 .env.*
+
+# Local / generated (hackathon tooling)
+logs/
+reviews_output/
+reviews-service/storage/
+reviews-service/scrape-debug.png
