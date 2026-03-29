@@ -10,6 +10,9 @@ export function LeadsView() {
     <EmbeddedFrame
       src={EXTERNAL_APP_URLS.TWENTY}
       title="Leads - Twenty"
+      appLabel="Twenty CRM"
+      showOpenInNewTabBar={false}
+      coverTwentyWorkspace
     />
   );
 }
