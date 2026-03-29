@@ -24,7 +24,7 @@ export class ReviewInsight {
   @Column({ type: 'jsonb' })
   risk_keywords: string[];
 
-  @Column({ type: 'text' })
+  @Column({ type: 'text', nullable: true })
   executive_summary: string;
 
   @Column({ type: 'jsonb', nullable: true })

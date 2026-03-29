@@ -7,9 +7,11 @@ import axios from 'axios';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { chromium, Page } from 'playwright';
 
-const DEMO_PLACE_ID = 'demo_sparsh_hospital';
+const DEMO_PLACE_ID = 'demo_hospital';
+/** Old demo id — insights may still be keyed here until migrated in getInsights */
+const LEGACY_DEMO_PLACE_ID = 'demo_sparsh_hospital';
 const DEMO_SOURCE = 'google_scrape_demo';
-const DEMO_MAX_REVIEWS = 32; // Real number of built-in Sparsh reviews — always show 32
+const DEMO_MAX_REVIEWS = 32; // Built-in demo reviews — always show 32
 const SOURCE_GOOGLE_API = 'google_api';
 const SOURCE_GOOGLE_SCRAPE = 'google_scrape';
 const CACHE_HOURS = 24;
@@ -381,17 +383,51 @@ Return ONLY valid JSON in this exact format:
       return await this.insightRepository.save(newInsight);
     } catch (error) {
       throw new HttpException(
-        `Failed to analyze reviews: ${(error as Error).message}`,
+        this.messageForAnalyzeFailure(error),
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
   }
 
+  /** Short client-facing message; avoids dumping raw Gemini HTTP bodies into the UI. */
+  private messageForAnalyzeFailure(error: unknown): string {
+    const msg = error instanceof Error ? error.message : String(error);
+    const lower = msg.toLowerCase();
+    if (
+      lower.includes('api key') ||
+      lower.includes('api_key_invalid') ||
+      lower.includes('expired') ||
+      lower.includes('permission denied') ||
+      lower.includes('generativelanguage.googleapis.com')
+    ) {
+      return 'Gemini API key is missing, invalid, or expired. Set GEMINI_API_KEY in reviews-service/.env.';
+    }
+    if (lower.includes('genai not configured') || lower.includes('not configured')) {
+      return 'GenAI is not configured. Set GEMINI_API_KEY in reviews-service/.env.';
+    }
+    const trimmed = msg.replace(/\s+/g, ' ').trim();
+    if (trimmed.length <= 180) {
+      return `Analysis failed: ${trimmed}`;
+    }
+    return 'Analysis failed. Check reviews-service logs for details.';
+  }
+
   async getInsights(placeId: string) {
-    const insight = await this.insightRepository.findOne({
+    let insight = await this.insightRepository.findOne({
       where: { place_id: placeId },
       order: { created_at: 'DESC' },
     });
+    if (!insight && placeId === DEMO_PLACE_ID) {
+      const legacy = await this.insightRepository.findOne({
+        where: { place_id: LEGACY_DEMO_PLACE_ID },
+        order: { created_at: 'DESC' },
+      });
+      if (legacy) {
+        legacy.place_id = DEMO_PLACE_ID;
+        await this.insightRepository.save(legacy);
+        insight = legacy;
+      }
+    }
     return insight ?? null;
   }
 
@@ -422,6 +458,10 @@ Return ONLY valid JSON in this exact format:
    * then saves to DB. Uses batch prompts to stay within token limits.
    */
   private async fillSummariesForPlace(placeId: string): Promise<void> {
+    // Demo mode should be fast and fully offline-friendly; don't call Gemini here.
+    if (placeId === DEMO_PLACE_ID) {
+      return;
+    }
     const reviews = await this.reviewRepository.find({
       where: { place_id: placeId },
       order: { id: 'ASC' },
@@ -534,7 +574,7 @@ ${numbered}`;
   }
 
   /**
-   * DEMO ONLY — Always returns the built-in Sparsh Hospital reviews (no cache).
+   * DEMO ONLY — Always returns the built-in demo hospital reviews (no cache).
    * Seeds DB and returns; analysis runs on this set. Not for production use.
    */
   async scrapeGoogleReviewsDemo(): Promise<{
@@ -554,11 +594,11 @@ ${numbered}`;
     }>;
   }> {
     return this.seedAndReturnDemoReviews(
-      'Demo: built-in Sparsh Hospital reviews loaded. Run Analysis for insights.',
+      'Demo: built-in hospital reviews loaded. Run Analysis for insights.',
     );
   }
 
-  /** Real Sparsh Hospital reviews (extracted from Google/local feedback) — used when demo place ID is selected. */
+  /** Sample hospital reviews — used when demo place ID is selected. */
   private static DEMO_REVIEWS_RAW: Array<{ author_name: string; rating: number; text: string }> = [
     {
       author_name: 'Umesh Biradar',
@@ -593,14 +633,14 @@ Overall, this was a highly frustrating and disappointing experience. Poor execut
     {
       author_name: 'Akhilesh Pg',
       rating: 1,
-      text: `Had a very bad experience with doctor ishwar amalazari gastroenterologist. He is just looking ways to loot money from the patients. I have a chronic Gastro problem. I had fever when I met him regarding my issues. He went through all my reports and told me to get blood test done, even though I had blood test report of just 20 days back in the report. As everyone knows blood report won't be accurate during fever, so I told him I'll get it done when I am cured from fever. But still, he didn't write down the gastric tablets when I requested him to give the tablets he indirectly blackmail my dad saying I'll write the tablets down, but if anything happens to him, I'm not responsible. My father got scared and got all my the blood test done for around 4000. After the test, he started forcing me to go to pulmonology department for again consultation which is 1100 rs more. When I told him I'll visit it some other time he got angry. And while giving the tablets he particularly mentioned. I'm only looking for gastric. If you have any other issues, you have to visit someone else. I won't write down any other tablets for you. If this is the case, why did he force me and indirectly blackmail my dad to get my blood test done? This is a daylight robbery. Sparsh has many good doctors, but I really didn't expect someone to be money minded like him. Totally disappointed with the experience.`,
+      text: `Had a very bad experience with doctor ishwar amalazari gastroenterologist. He is just looking ways to loot money from the patients. I have a chronic Gastro problem. I had fever when I met him regarding my issues. He went through all my reports and told me to get blood test done, even though I had blood test report of just 20 days back in the report. As everyone knows blood report won't be accurate during fever, so I told him I'll get it done when I am cured from fever. But still, he didn't write down the gastric tablets when I requested him to give the tablets he indirectly blackmail my dad saying I'll write the tablets down, but if anything happens to him, I'm not responsible. My father got scared and got all my the blood test done for around 4000. After the test, he started forcing me to go to pulmonology department for again consultation which is 1100 rs more. When I told him I'll visit it some other time he got angry. And while giving the tablets he particularly mentioned. I'm only looking for gastric. If you have any other issues, you have to visit someone else. I won't write down any other tablets for you. If this is the case, why did he force me and indirectly blackmail my dad to get my blood test done? This is a daylight robbery. The hospital has many good doctors, but I really didn't expect someone to be money minded like him. Totally disappointed with the experience.`,
     },
     {
       author_name: 'Shreekrishna Karthik B',
       rating: 5,
-      text: `Neat and clean hospital. Facility of paid parking is available. Parking fee of ₹20 per first hour and after that ₹10 for every hour for two wheelers. I visited here for corporate health check up. Registered at 7 am morning. Completed all tests at 10.45am. They are providing breakfast with this plan. (any one item Idli vada, rice bath, poori). After completing the tests report follows after 2 hr. After that consultation with doctor will be there. All the reports will be available in sparsh anubhava app.
+      text: `Neat and clean hospital. Facility of paid parking is available. Parking fee of ₹20 per first hour and after that ₹10 for every hour for two wheelers. I visited here for corporate health check up. Registered at 7 am morning. Completed all tests at 10.45am. They are providing breakfast with this plan. (any one item Idli vada, rice bath, poori). After completing the tests report follows after 2 hr. After that consultation with doctor will be there. All the reports will be available in the hospital patient app.
 
-Dear Sparsh Hospital Yashwantpur team,
+Dear hospital team,
 
 I wanted to express my sincere appreciation for the excellent health check services provided to Resil Laboratories employees. The team was professional, and the facilities were top-notch. The process was smooth and efficient, and we appreciate the care taken to ensure our well-being.
 
@@ -609,22 +649,22 @@ Thank you for your dedication to healthcare excellence Mrs Latha and Mr Saran.`,
     {
       author_name: 'Umesh Matapathi',
       rating: 5,
-      text: `Dr Satish treating very good 👍 Thank you again for your support and dedication to providing top-notch care. Please keep up the great work! Sparsh Hospital Yashwantpur Team. I received excellent care and treatment during my recent visit. The staff were helpful, and the facilities were great. Thank you for your support! 🙏`,
+      text: `Dr Satish treating very good 👍 Thank you again for your support and dedication to providing top-notch care. Please keep up the great work! Hospital team. I received excellent care and treatment during my recent visit. The staff were helpful, and the facilities were great. Thank you for your support! 🙏`,
     },
     {
       author_name: 'thirumalesh kothapalli',
       rating: 5,
-      text: `I underwent surgery at Sparsh Hospital and received excellent treatment. From admission to discharge, the care provided was outstanding. Special thanks to Dr. Muralidhar and his entire team for their expert treatment and compassionate care. I would also like to sincerely thank Ms. Rekha from the marketing team for her continuous support and guidance throughout the process. The doctors, nurses, and support staff were very professional, kind, and attentive. I truly felt cared for at every step. Highly recommended Sparsh Hospital.`,
+      text: `I underwent surgery at this hospital and received excellent treatment. From admission to discharge, the care provided was outstanding. Special thanks to Dr. Muralidhar and his entire team for their expert treatment and compassionate care. I would also like to sincerely thank Ms. Rekha from the marketing team for her continuous support and guidance throughout the process. The doctors, nurses, and support staff were very professional, kind, and attentive. I truly felt cared for at every step. Highly recommended.`,
     },
     {
       author_name: 'Ramegowda M',
       rating: 5,
-      text: `I am really grateful to the exceptional care provided by doctor Shivakumar and Dr Abhinandan and Neuro science team. The supporting staff including nurses, billing, housekeeping were also very helpful. Overall we had a positive experience. And I would like to thanks Ms Rinisha she helped me in insurance and she guided nicely from admission to till discharge. Overall nice experience in sparsh hospital. Thanks sparsh.`,
+      text: `I am really grateful to the exceptional care provided by doctor Shivakumar and Dr Abhinandan and Neuro science team. The supporting staff including nurses, billing, housekeeping were also very helpful. Overall we had a positive experience. And I would like to thanks Ms Rinisha she helped me in insurance and she guided nicely from admission to till discharge. Overall nice experience at this hospital. Thanks.`,
     },
     {
       author_name: 'Ani C J',
       rating: 5,
-      text: `He was struggling to talk and walk. Luckily I could rush him to Sparsh hospital and the casualty and neuroscience team headed by Dr Sreenivas M were very quick and cooperative and were happy to receive a patient in emergency.`,
+      text: `He was struggling to talk and walk. Luckily I could rush him to this hospital and the casualty and neuroscience team headed by Dr Sreenivas M were very quick and cooperative and were happy to receive a patient in emergency.`,
     },
     {
       author_name: 'Sheela G S',
@@ -690,7 +730,7 @@ I had recommended this hospital for my niece's treatment solely because my trust
     {
       author_name: 'Chetna Anjali',
       rating: 1,
-      text: `One of the worst medical experiences of my life was at Sparsh hospital. The doctors at Sparsh are only money minded. They keep their profits even above the well being of the patients. I was in extreme pain for 3 days yet they kept…`,
+      text: `One of the worst medical experiences of my life was at this hospital. The doctors here are only money minded. They keep their profits even above the well being of the patients. I was in extreme pain for 3 days yet they kept…`,
     },
     {
       author_name: 'Nikhil Duddi Ramesh',
@@ -700,12 +740,12 @@ I had recommended this hospital for my niece's treatment solely because my trust
     {
       author_name: 'arun kumar',
       rating: 1,
-      text: `Never go to sparsh hospital. The service is very bad. The staff are very rude.`,
+      text: `Never go to this hospital. The service is very bad. The staff are very rude.`,
     },
     {
       author_name: 'Diwakar Narayan',
       rating: 2,
-      text: `I went to Sparsh for health check-up. The testing procedure was fine, however the doctors' consultation part of the health check plan is botched up. For an OBG consultation, I got sent to two junior doctors, who were very dismissive…`,
+      text: `I went to this hospital for health check-up. The testing procedure was fine, however the doctors' consultation part of the health check plan is botched up. For an OBG consultation, I got sent to two junior doctors, who were very dismissive…`,
     },
     {
       author_name: 'manjunath D',
@@ -739,7 +779,7 @@ I had recommended this hospital for my niece's treatment solely because my trust
     },
   ];
 
-  /** Ensures DB has exactly the built-in Sparsh demo reviews (replaces any existing demo data). */
+  /** Ensures DB has exactly the built-in demo reviews (replaces any existing demo data). */
   private async seedDemoReviewsToDb(): Promise<void> {
     await this.reviewRepository.delete({ place_id: DEMO_PLACE_ID });
     const balanced = ReviewsService.DEMO_REVIEWS_RAW.map((r) => ({
@@ -885,7 +925,7 @@ I had recommended this hospital for my niece's treatment solely because my trust
   }
 
   /**
-   * Runs Playwright scrape (Sparsh Hospital), normalizes and balances to ~30, saves with given placeId and source (e.g. google_scrape).
+   * Runs Playwright scrape (default Maps URL), normalizes and balances to ~30, saves with given placeId and source (e.g. google_scrape).
    */
   async runScraperAndSave(
     placeId: string,
